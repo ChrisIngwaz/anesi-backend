@@ -24,13 +24,20 @@ app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace("whatsapp:", "") : "";
 
+  console.log("Mensaje recibido de:", userPhone);
+
   try {
-    const { data: usuario } = await supabase.from('usuarios').select('*').eq('telefono', userPhone).single();
-    if (!usuario) return res.status(200).send("Usuario no registrado");
+    const { data: usuario, error: dbError } = await supabase.from('usuarios').select('*').eq('telefono', userPhone).single();
+    
+    if (dbError || !usuario) {
+      console.log("Usuario no encontrado en Supabase:", userPhone);
+      return res.status(200).send("Usuario no registrado");
+    }
 
     let mensajeUsuario = Body || "";
 
     if (MediaUrl0) {
+      console.log("Procesando audio de WhatsApp...");
       const response = await fetch(MediaUrl0);
       const blob = await response.blob();
       const transcription = await openai.audio.transcriptions.create({
@@ -38,12 +45,13 @@ app.all("/whatsapp", async (req, res) => {
         model: "whisper-1",
       });
       mensajeUsuario = transcription.text;
+      console.log("Transcripción exitosa:", mensajeUsuario);
     }
 
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor Transformador de los 3 Cerebros (Visceral, Emocional y Racional). Eres una autoridad con conocimientos profundos en Psicología, Nutrición, Programación Neurolingüística (PNL), Meditación Guiada, Bioenergética, Técnicas de Respiración, Espiritualidad Holística y Terapia de Reprocesamiento Generativo de la mente. Tu misión es explicar de forma clara, detallada y con palabras sencillas cómo la inflamación sistémica y la mala gestión emocional desconectan el eje intestino-corazón-cerebro. Guía al usuario a comprender que su salud y paz dependen de su equilibrio interno. Usa tu autoridad para dar explicaciones fundamentadas pero comprensibles que generen confianza. Al final, añade siempre la etiqueta correspondiente: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor Transformador de los 3 Cerebros (Visceral, Emocional y Racional). Eres una autoridad con conocimientos profundos en Psicología, Nutrición, PNL, Meditación, Bioenergética y Terapia de Reprocesamiento Generativo. Explica de forma clara y sencilla cómo la inflamación y las emociones desconectan el cuerpo. Guía al usuario a su equilibrio interno. Al final, añade SIEMPRE una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeUsuario }
       ]
     });
@@ -66,11 +74,14 @@ app.all("/whatsapp", async (req, res) => {
         </Message>
       </Response>`;
 
+    console.log("Respuesta enviada con éxito.");
     return res.type("text/xml").send(responseXml);
-  } catch (error) {
+
+  } catch (error: any) {
+    console.error("ERROR DETECTADO:", error.message);
     return res.status(200).send("OK");
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Anesi Mentor Online`));
+app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Anesi Mentor Online en puerto ${PORT}`));
