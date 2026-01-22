@@ -1,7 +1,7 @@
 import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
-import fetch from "node-fetch";
+const fetch = require('node-fetch');
 
 const app = express();
 app.use(express.json());
