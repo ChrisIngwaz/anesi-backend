@@ -24,30 +24,29 @@ app.all("/whatsapp", async (req, res) => {
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
-    // 1. OBTENER USUARIO (Búsqueda simplificada)
-    const { data: usuario, error: dbError } = await supabase
+    // 1. BUSQUEDA SIMPLIFICADA (Un solo intento)
+    const { data: usuario } = await supabase
       .from('usuarios')
       .select('nombre')
-      .eq('telefono', userPhone)
-      .maybeSingle();
+      .or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`)
+      .single();
 
-    // Si no lo encuentra con el número limpio, intentamos con el +
-    let nombreFinal = usuario?.nombre;
-    if (!nombreFinal) {
-        const { data: usuarioPlus } = await supabase.from('usuarios').select('nombre').eq('telefono', `+${userPhone}`).maybeSingle();
-        nombreFinal = usuarioPlus?.nombre;
+    if (!usuario) {
+        console.log("Usuario no encontrado:", userPhone);
+        return res.status(200).send("OK");
     }
 
-    if (!nombreFinal) return res.status(200).send("Usuario no registrado");
-
+    const nombreReal = usuario.nombre;
     let mensajeTexto = Body || "";
 
-    // 2. PROCESAR AUDIO
+    // 2. PROCESAMIENTO DE AUDIO CON TIMEOUT
     if (MediaUrl0) {
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+      
       const response = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` }
+        headers: { 'Authorization': `Basic ${twilioAuth}` },
+        timeout: 10000 // 10 segundos máximo para descargar
       });
       
       const form = new FormData();
@@ -55,30 +54,35 @@ app.all("/whatsapp", async (req, res) => {
       form.append('model', 'whisper-1');
 
       const transcriptionRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
+        headers: { 
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 
+            ...form.getHeaders() 
+        },
+        timeout: 15000 // 15 segundos para transcribir
       });
 
       mensajeTexto = transcriptionRes.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO / ALUCINACIÓN
-    const esBajaCalidad = mensajeTexto.length < 8 || ["gracias", "de nada", "thank you", "placer"].some(f => mensajeTexto.toLowerCase().includes(f) && mensajeTexto.length < 30);
+    // 3. FILTRO DE SILENCIO ACTUALIZADO
+    const esSilencio = mensajeTexto.trim().length < 6 || 
+                       ["gracias", "thank you", "de nada", "bye"].some(f => mensajeTexto.toLowerCase() === f);
 
-    if (MediaUrl0 && esBajaCalidad) {
+    if (MediaUrl0 && esSilencio) {
       res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
-          <Message><Body>Hola ${nombreFinal}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body></Message>
+          <Message><Body>Hola ${nombreReal}. No pude escucharte bien. Si necesitas apoyo, envía un voice y dime qué sientes. ✨</Body></Message>
         </Response>`);
     }
 
-    // 4. IA MENTOR (Instrucción de Nombre Forzada)
+    // 4. IA MENTOR
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreFinal} con paz. REGLA: Usa siempre el nombre ${nombreFinal} y NUNCA uses "amigo" o "amiga". Sé breve (2 frases). Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
+          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreReal} con paz. USA SIEMPRE EL NOMBRE ${nombreReal}. NUNCA uses "amigo/a". Máximo 2 frases. Etiqueta obligatoria: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
         },
         { role: "user", content: mensajeTexto }
       ]
@@ -103,10 +107,13 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("CRASH:", error.message);
+    // ESTO NOS DIRÁ QUÉ PASA REALMENTE
+    console.error("ERROR DETECTADO:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está procesando. Reintenta en un momento.</Body></Message></Response>`);
+      <Response>
+        <Message><Body>Anesi detectó un error: ${error.message}. Por favor, avisa al administrador.</Body></Message>
+      </Response>`);
   }
 });
 
