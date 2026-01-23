@@ -45,16 +45,17 @@ app.all("/whatsapp", async (req, res) => {
         headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
       });
 
-      mensajeTexto = transcriptionRes.data.text;
+      mensajeTexto = transcriptionRes.data.text || "";
     }
 
-    // VALIDACIÓN DE SILENCIO
-    if (!mensajeTexto || mensajeTexto.trim().length < 2) {
+    // --- FILTRO DE SILENCIO / RUIDO SIN SENTIDO ---
+    // Si la transcripción es muy corta o está vacía, enviamos el mensaje de ayuda.
+    if (mensajeTexto.trim().length < 8) {
       res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Message>
-            <Body>Hola ${usuario.nombre}, no pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body>
+            <Body>Hola ${usuario.nombre}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body>
           </Message>
         </Response>`);
     }
@@ -62,7 +63,7 @@ app.all("/whatsapp", async (req, res) => {
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: `Eres Anesi, el Mentor de los 3 Cerebros. Tu misión es dar paz. Responde a ${usuario.nombre} con mucha compasión en una sola frase breve. Termina obligatoriamente con una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
+        { role: "system", content: `Eres Anesi, el Mentor de los 3 Cerebros. Da una respuesta breve de paz a ${usuario.nombre}. Termina obligatoriamente con una sola etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -78,12 +79,16 @@ app.all("/whatsapp", async (req, res) => {
     const audioUrl = AUDIOS_BETA[emocion];
     const mensajeLimpio = respuestaTextoRaw.replace(/\[.*?\]/g, "").trim();
 
+    // --- SOLUCIÓN PARA EL TEXTO Y AUDIO ---
+    // Twilio a veces falla al enviar texto + media en un solo <Message>. 
+    // Los separamos en dos etiquetas <Message> para que lleguen como dos globos de texto seguidos.
     res.set("Content-Type", "text/xml");
-    // ESTRUCTURA CORREGIDA: Cuerpo de texto + Media en el mismo mensaje
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
           <Body>${mensajeLimpio}</Body>
+        </Message>
+        <Message>
           <Media>${audioUrl}</Media>
         </Message>
       </Response>`);
