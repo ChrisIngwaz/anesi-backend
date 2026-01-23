@@ -19,18 +19,19 @@ const AUDIOS: any = {
   neutro: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/neutro_v2.mp3"
 };
 
-// CAMBIO CRÍTICO: Usamos .post explícitamente para evitar el 404
-app.post("/whatsapp", async (req, res) => {
+// USAMOS .all PARA QUE NADA DE UN 404
+app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
-  const phoneDigits = rawPhone.replace(/\D/g, "");
+  
+  console.log(`Petición entrante de: ${rawPhone}`); // Esto saldrá en tu log de Render
 
   try {
-    // 1. BUSCAR NOMBRE (Probamos número completo y últimos 9 dígitos)
+    // 1. BUSCAR NOMBRE (Forma ultra-simple)
     const { data: usuario } = await supabase
       .from('usuarios')
       .select('nombre')
-      .or(`telefono.eq.${rawPhone},telefono.eq.${phoneDigits},telefono.ilike.%${phoneDigits.slice(-9)}`)
+      .or(`telefono.ilike.%${rawPhone.slice(-9)}%`) // Busca los últimos 9 dígitos
       .maybeSingle();
 
     const nombreUser = usuario?.nombre || "corazón";
@@ -55,7 +56,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     // 3. FILTRO DE SILENCIO / ALUCINACIONES
-    const basura = ["bon appetit", "gracias", "thank you", "placer", "subtitles", "bye"];
+    const basura = ["bon appetit", "gracias", "thank you", "subtitles", "bye"];
     const esBasura = basura.some(b => textoEscuchado.toLowerCase().includes(b)) && textoEscuchado.length < 20;
 
     res.set("Content-Type", "text/xml");
@@ -69,37 +70,33 @@ app.post("/whatsapp", async (req, res) => {
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { 
-          role: "system", 
-          content: `Eres Anesi, Mentor de paz. Saluda por nombre a ${nombreUser}. Responde con compasión en 2 frases. NO uses "amigo/a". Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
-        },
+        { role: "system", content: `Eres Anesi, Mentor. Saluda a ${nombreUser}. Responde en 2 frases con paz. Etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
         { role: "user", content: textoEscuchado }
       ]
     });
 
-    const respuestaRaw = ai.choices[0].message.content || "";
+    const resIA = ai.choices[0].message.content || "";
     let emocion = "neutro";
-    if (respuestaRaw.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
-    else if (respuestaRaw.includes("ANSIEDAD")) emocion = "ansiedad";
-    else if (respuestaRaw.includes("IRA")) emocion = "ira";
-    else if (respuestaRaw.includes("TRISTEZA")) emocion = "tristeza";
+    if (resIA.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (resIA.includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (resIA.includes("IRA")) emocion = "ira";
+    else if (resIA.includes("TRISTEZA")) emocion = "tristeza";
 
-    const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
+    const msg = resIA.replace(/\[.*?\]/g, "").trim();
 
-    // 5. RESPUESTA FINAL
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
-        <Message><Body>${mensajeLimpio}</Body></Message>
+        <Message><Body>${msg}</Body></Message>
         <Message><Media>${AUDIOS[emocion]}</Media></Message>
       </Response>`);
 
   } catch (error: any) {
-    console.error("ERROR:", error.message);
+    console.error("ERROR INTERNO:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está recalibrando... Por favor intenta de nuevo.</Body></Message></Response>`);
+      <Response><Message><Body>Anesi está conectando... Intenta de nuevo.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("🚀 Servidor Arriba"));
 app.listen(process.env.PORT || 3000);
