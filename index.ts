@@ -32,9 +32,11 @@ app.all("/whatsapp", async (req, res) => {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // SOLUCIÓN DEFINITIVA: Crear el archivo con el formato exacto que Whisper exige
+      // CAMBIO CLAVE: Forzamos el nombre a .mp3 para que OpenAI lo acepte siempre
+      const file = await OpenAI.toFile(buffer, 'audio.mp3');
+
       const transcription = await openai.audio.transcriptions.create({
-        file: await OpenAI.toFile(buffer, 'audio.ogg', { type: 'audio/ogg' }),
+        file: file,
         model: "whisper-1",
       });
       mensajeTexto = transcription.text;
@@ -43,15 +45,15 @@ app.all("/whatsapp", async (req, res) => {
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor Transformador de los 3 Cerebros. Identifica el dolor del usuario. Responde con compasión en máximo 2 frases y termina siempre con una de estas etiquetas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento. Responde con compasión en 2 frases y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
 
     const respuestaTexto = mentorResponse.choices[0].message.content || "";
-    
     let emocion = "neutro";
     const textoUpper = respuestaTexto.toUpperCase();
+    
     if (textoUpper.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
     else if (textoUpper.includes("ANSIEDAD")) emocion = "ansiedad";
     else if (textoUpper.includes("IRA")) emocion = "ira";
@@ -70,13 +72,12 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error detallado:", error);
+    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
-    // Mensaje de diagnóstico para saber qué falló exactamente
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi detectó un error: ${error.message.substring(0, 50)}... Intenta de nuevo.</Body>
+          <Body>Anesi está procesando tu voz. Intenta un mensaje corto de nuevo.</Body>
         </Message>
       </Response>`);
   }
