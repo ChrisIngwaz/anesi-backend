@@ -1,8 +1,6 @@
 import express from "express";
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from "openai";
-import fs from "fs";
-import path from "path";
+import OpenAI, { toFile } from "openai";
 const fetch = require('node-fetch');
 
 const app = express();
@@ -20,46 +18,36 @@ const AUDIOS_BETA: any = {
   neutro: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/neutro_v2.mp3"
 };
 
-app.get("/", (req, res) => res.send("<h1>🚀 Anesi Online - Fase Beta</h1>"));
+app.get("/", (req, res) => res.send("<h1>🚀 Anesi Online Activo</h1>"));
 
 app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
-    const { data: usuario } = await supabase
-      .from('usuarios')
-      .select('*')
-      .or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`)
-      .single();
-    
+    const { data: usuario } = await supabase.from('usuarios').select('*').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
     if (!usuario) return res.status(200).send("OK");
 
     let mensajeUsuario = Body || "";
 
     if (MediaUrl0) {
-      console.log("Descargando audio...");
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // Creamos un archivo temporal real para asegurar la compatibilidad
-      const tempPath = path.join("/tmp", `audio_${Date.now()}.ogg`);
-      fs.writeFileSync(tempPath, buffer);
+      // Convertimos el audio directamente para OpenAI sin usar archivos temporales en disco
+      const file = await toFile(buffer, "audio.ogg");
 
       const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(tempPath),
+        file: file,
         model: "whisper-1",
       });
-      
       mensajeUsuario = transcription.text;
-      fs.unlinkSync(tempPath); // Borramos el temporal
-      console.log("Transcripción lograda.");
     }
 
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Analiza el dolor del usuario. Responde muy brevemente (máximo 2 frases) y añade al final una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y añade: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeUsuario }
       ]
     });
@@ -71,24 +59,21 @@ app.all("/whatsapp", async (req, res) => {
     else if (respuestaTexto.includes("[IRA]")) emocion = "ira";
     else if (respuestaTexto.includes("[TRISTEZA]")) emocion = "tristeza";
 
-    const mensajeLimpio = respuestaTexto.replace(/\[.*?\]/g, "").trim();
     const audioUrl = AUDIOS_BETA[emocion];
 
-    const responseXml = `
+    return res.type("text/xml").send(`
       <Response>
         <Message>
-          <Body>Hola ${usuario.nombre}. ${mensajeLimpio}\n\nEscucha este ejercicio:</Body>
+          <Body>Hola ${usuario.nombre}. He analizado tu mensaje. Escucha este ejercicio:</Body>
           <Media>${audioUrl}</Media>
         </Message>
-      </Response>`;
-
-    return res.type("text/xml").send(responseXml);
+      </Response>`);
 
   } catch (error: any) {
-    console.error("ERROR DETALLADO:", error.message);
-    return res.type("text/xml").send("<Response><Message><Body>Lo siento, Anesi está procesando mucha información. ¿Podrías intentar el audio una vez más?</Body></Message></Response>");
+    console.error("ERROR:", error.message);
+    return res.status(200).send("OK");
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => console.log(`🚀 Anesi Mentor Listo`));
+app.listen(PORT, "0.0.0.0");
