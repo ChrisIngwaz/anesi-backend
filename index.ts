@@ -24,14 +24,17 @@ app.all("/whatsapp", async (req, res) => {
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
-    // 1. Buscamos al usuario de forma exhaustiva
-    const { data: usuario } = await supabase.from('usuarios').select('*').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
+    // 1. Buscamos al usuario. Si no existe, ignoramos.
+    const { data: usuario, error: userError } = await supabase
+      .from('usuarios')
+      .select('nombre')
+      .or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`)
+      .single();
     
-    // Si no existe el usuario, no procesamos nada por privacidad
     if (!usuario) return res.status(200).send("OK");
 
-    // 2. Extraemos el nombre y lo limpiamos
-    const nombreUsuario = usuario.nombre || "amigo/a";
+    // FORZAMOS EL NOMBRE: No hay más "amigo/a"
+    const nombreReal = usuario.nombre; 
 
     let mensajeTexto = Body || "";
 
@@ -54,30 +57,30 @@ app.all("/whatsapp", async (req, res) => {
       mensajeTexto = transcriptionRes.data.text || "";
     }
 
-    // --- FILTRO DE SILENCIO / RUIDO ---
-    const frasesAlucinadas = ["gracias por ver", "subtitles by", "gracias.", "thank you.", "de nada.", "hola.", "audio.", "descargar."];
-    const esAlucinacion = frasesAlucinadas.some(f => mensajeTexto.toLowerCase().trim() === f);
-
-    if (mensajeTexto.trim().length < 6 || esAlucinacion) {
+    // --- FILTRO ULTRA-ESTRICTO PARA SILENCIO ---
+    // Si el mensaje es basura de Whisper o muy corto:
+    const esRelleno = ["gracias por", "de nada", "siempre es un placer", "gracias.", "thank you"].some(f => mensajeTexto.toLowerCase().includes(f));
+    
+    if (mensajeTexto.trim().length < 10 || (MediaUrl0 && esRelleno && mensajeTexto.length < 50)) {
       res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
           <Message>
-            <Body>Hola ${nombreUsuario}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body>
+            <Body>Hola ${nombreReal}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body>
           </Message>
         </Response>`);
     }
 
-    // --- RESPUESTA PERSONALIZADA DE ANESI ---
+    // --- RESPUESTA DE ANESI CON IDENTIDAD FORZADA ---
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, el Mentor de los 3 Cerebros. Eres cálido y sabio. 
-          IMPORTANTE: Dirígete siempre a ${nombreUsuario} por su nombre en tu respuesta. 
-          Responde con compasión en máximo 2 frases. 
-          Termina siempre con una de estas etiquetas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
+          content: `Eres Anesi, Mentor de los 3 Cerebros. 
+          REGLA DE ORO: Debes empezar o incluir el nombre "${nombreReal}" en tu respuesta. 
+          NUNCA uses "amigo" o "amiga". Sé breve (2 frases) y compasivo. 
+          Termina con una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
         },
         { role: "user", content: mensajeTexto }
       ]
@@ -102,7 +105,6 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response><Message><Body>Anesi está recalibrando su energía. Intenta de nuevo.</Body></Message></Response>`);
