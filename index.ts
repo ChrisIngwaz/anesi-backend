@@ -24,99 +24,79 @@ app.all("/whatsapp", async (req, res) => {
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
-    // 1. BUSQUEDA SIMPLIFICADA (Un solo intento)
-    const { data: usuario } = await supabase
-      .from('usuarios')
-      .select('nombre')
-      .or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`)
-      .single();
-
-    if (!usuario) {
-        console.log("Usuario no encontrado:", userPhone);
-        return res.status(200).send("OK");
-    }
-
-    const nombreReal = usuario.nombre;
+    // 1. Buscamos al usuario de la forma más rápida
+    const { data: usuario } = await supabase.from('usuarios').select('nombre').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
+    
+    // Si no existe, enviamos OK para que Twilio no reintente eternamente
+    if (!usuario) return res.status(200).send("OK");
+    
+    const nombreUsuario = usuario.nombre || "amigo/a";
     let mensajeTexto = Body || "";
 
-    // 2. PROCESAMIENTO DE AUDIO CON TIMEOUT
+    // 2. Procesar el Audio (Esto ya funcionaba)
     if (MediaUrl0) {
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-      
-      const response = await axios.get(MediaUrl0, {
+      const audioResponse = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` },
-        timeout: 10000 // 10 segundos máximo para descargar
+        headers: { 'Authorization': `Basic ${twilioAuth}` }
       });
       
       const form = new FormData();
-      form.append('file', Buffer.from(response.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
+      form.append('file', Buffer.from(audioResponse.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
 
-      const transcriptionRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-        headers: { 
-            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 
-            ...form.getHeaders() 
-        },
-        timeout: 15000 // 15 segundos para transcribir
+      const transcription = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
       });
-
-      mensajeTexto = transcriptionRes.data.text || "";
+      mensajeTexto = transcription.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO ACTUALIZADO
-    const esSilencio = mensajeTexto.trim().length < 6 || 
-                       ["gracias", "thank you", "de nada", "bye"].some(f => mensajeTexto.toLowerCase() === f);
-
-    if (MediaUrl0 && esSilencio) {
+    // 3. Filtro de Silencio (Si el mensaje es muy corto, pedimos apoyo)
+    if (mensajeTexto.trim().length < 7) {
       res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
-          <Message><Body>Hola ${nombreReal}. No pude escucharte bien. Si necesitas apoyo, envía un voice y dime qué sientes. ✨</Body></Message>
+          <Message><Body>Hola ${nombreUsuario}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body></Message>
         </Response>`);
     }
 
-    // 4. IA MENTOR
-    const mentorResponse = await openai.chat.completions.create({
-      model: "gpt-4o-mini", 
+    // 4. Respuesta de Anesi (Inyectando el nombre)
+    const mentorRes = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreReal} con paz. USA SIEMPRE EL NOMBRE ${nombreReal}. NUNCA uses "amigo/a". Máximo 2 frases. Etiqueta obligatoria: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
+          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreUsuario} con paz y brevedad (2 frases). DEBES usar su nombre ${nombreUsuario}. Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
         },
         { role: "user", content: mensajeTexto }
       ]
     });
 
-    const respuestaTextoRaw = mentorResponse.choices[0].message.content || "";
+    const respuestaRaw = mentorRes.choices[0].message.content || "";
     let emocion = "neutro";
-    const tU = respuestaTextoRaw.toUpperCase();
-    if (tU.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
-    else if (tU.includes("ANSIEDAD")) emocion = "ansiedad";
-    else if (tU.includes("IRA")) emocion = "ira";
-    else if (tU.includes("TRISTEZA")) emocion = "tristeza";
+    if (respuestaRaw.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (respuestaRaw.includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (respuestaRaw.includes("IRA")) emocion = "ira";
+    else if (respuestaRaw.includes("TRISTEZA")) emocion = "tristeza";
 
-    const audioUrl = AUDIOS_BETA[emocion];
-    const mensajeLimpio = respuestaTextoRaw.replace(/\[.*?\]/g, "").trim();
+    const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
 
+    // 5. Respuesta TwiML (Dos mensajes para asegurar texto + audio)
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message><Body>${mensajeLimpio}</Body></Message>
-        <Message><Media>${audioUrl}</Media></Message>
+        <Message><Media>${AUDIOS_BETA[emocion]}</Media></Message>
       </Response>`);
 
   } catch (error: any) {
-    // ESTO NOS DIRÁ QUÉ PASA REALMENTE
-    console.error("ERROR DETECTADO:", error.message);
+    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Message><Body>Anesi detectó un error: ${error.message}. Por favor, avisa al administrador.</Body></Message>
-      </Response>`);
+      <Response><Message><Body>Anesi está conectando... Intenta tu audio de nuevo.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("🚀 Anesi Activo"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0");
