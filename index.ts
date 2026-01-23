@@ -22,23 +22,29 @@ const AUDIOS_BETA: any = {
 app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
+  
+  // Establecemos respuesta XML de inmediato para evitar timeouts
+  res.set("Content-Type", "text/xml");
 
   try {
-    // 1. Buscamos al usuario de la forma más rápida
-    const { data: usuario } = await supabase.from('usuarios').select('nombre').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
-    
-    // Si no existe, enviamos OK para que Twilio no reintente eternamente
-    if (!usuario) return res.status(200).send("OK");
-    
-    const nombreUsuario = usuario.nombre || "amigo/a";
+    // 1. OBTENER NOMBRE (Búsqueda simplificada para evitar bloqueos)
+    let nombreUsuario = "amigo/a";
+    try {
+      const { data: usuario } = await supabase.from('usuarios').select('nombre').eq('telefono', userPhone).maybeSingle();
+      if (usuario?.nombre) nombreUsuario = usuario.nombre;
+    } catch (e) {
+      console.log("Error rápido en DB, usando genérico");
+    }
+
     let mensajeTexto = Body || "";
 
-    // 2. Procesar el Audio (Esto ya funcionaba)
+    // 2. PROCESAR AUDIO (Estructura probada)
     if (MediaUrl0) {
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
       const audioResponse = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` }
+        headers: { 'Authorization': `Basic ${twilioAuth}` },
+        timeout: 8000
       });
       
       const form = new FormData();
@@ -51,22 +57,21 @@ app.all("/whatsapp", async (req, res) => {
       mensajeTexto = transcription.data.text || "";
     }
 
-    // 3. Filtro de Silencio (Si el mensaje es muy corto, pedimos apoyo)
-    if (mensajeTexto.trim().length < 7) {
-      res.set("Content-Type", "text/xml");
+    // 3. FILTRO DE SILENCIO
+    if (!mensajeTexto || mensajeTexto.trim().length < 6) {
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
-          <Message><Body>Hola ${nombreUsuario}. No pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body></Message>
+          <Message><Body>Hola ${nombreUsuario}. No pude escucharte bien. Si necesitas apoyo, envía un audio contándome qué sientes. ✨</Body></Message>
         </Response>`);
     }
 
-    // 4. Respuesta de Anesi (Inyectando el nombre)
+    // 4. IA MENTOR (Instrucción directa)
     const mentorRes = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreUsuario} con paz y brevedad (2 frases). DEBES usar su nombre ${nombreUsuario}. Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
+          content: `Eres Anesi, Mentor de paz. Saluda por nombre a ${nombreUsuario} y responde en 2 frases con mucha compasión. NUNCA uses la palabra "amigo" o "amiga". Termina con una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
         },
         { role: "user", content: mensajeTexto }
       ]
@@ -81,8 +86,7 @@ app.all("/whatsapp", async (req, res) => {
 
     const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
 
-    // 5. Respuesta TwiML (Dos mensajes para asegurar texto + audio)
-    res.set("Content-Type", "text/xml");
+    // 5. RESPUESTA FINAL
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message><Body>${mensajeLimpio}</Body></Message>
@@ -90,13 +94,11 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error:", error.message);
-    res.set("Content-Type", "text/xml");
+    console.error("Crash:", error.message);
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está conectando... Intenta tu audio de nuevo.</Body></Message></Response>`);
+      <Response><Message><Body>Anesi está conectando. Por favor intenta tu audio una vez más.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Activo"));
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0");
+app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.listen(process.env.PORT || 3000);
