@@ -20,7 +20,7 @@ const AUDIOS_BETA: any = {
 };
 
 app.all("/whatsapp", async (req, res) => {
-  const { From, Body, MediaUrl0, AccountSid } = req.body;
+  const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
@@ -30,10 +30,7 @@ app.all("/whatsapp", async (req, res) => {
     let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
-      // CLAVE: Twilio requiere Auth para descargar archivos. 
-      // Usamos el AccountSid y el AuthToken que ya tienes en tus variables.
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-      
       const response = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
         headers: { 'Authorization': `Basic ${twilioAuth}` }
@@ -45,39 +42,48 @@ app.all("/whatsapp", async (req, res) => {
       form.append('model', 'whisper-1');
 
       const transcriptionRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          ...form.getHeaders(),
-        },
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
       });
 
       mensajeTexto = transcriptionRes.data.text;
     }
 
+    // VALIDACIÓN DE SILENCIO
+    if (!mensajeTexto || mensajeTexto.trim().length < 2) {
+      res.set("Content-Type", "text/xml");
+      return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+          <Message>
+            <Body>Hola ${usuario.nombre}, no pude escucharte bien. Si necesitas apoyo, envía un voice y explícame lo que estás sintiendo. ✨</Body>
+          </Message>
+        </Response>`);
+    }
+
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: `Eres Anesi, el Mentor de los 3 Cerebros. Tu misión es dar paz. Responde a ${usuario.nombre} con mucha compasión en una sola frase breve. Termina obligatoriamente con una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
         { role: "user", content: mensajeTexto }
       ]
     });
 
-    const respuestaTexto = mentorResponse.choices[0].message.content || "";
+    const respuestaTextoRaw = mentorResponse.choices[0].message.content || "";
     let emocion = "neutro";
-    const tU = respuestaTexto.toUpperCase();
+    const tU = respuestaTextoRaw.toUpperCase();
     if (tU.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
     else if (tU.includes("ANSIEDAD")) emocion = "ansiedad";
     else if (tU.includes("IRA")) emocion = "ira";
     else if (tU.includes("TRISTEZA")) emocion = "tristeza";
 
     const audioUrl = AUDIOS_BETA[emocion];
-    const mensajeLimpio = respuestaTexto.replace(/\[.*?\]/g, "").trim();
+    const mensajeLimpio = respuestaTextoRaw.replace(/\[.*?\]/g, "").trim();
 
     res.set("Content-Type", "text/xml");
+    // ESTRUCTURA CORREGIDA: Cuerpo de texto + Media en el mismo mensaje
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Hola ${usuario.nombre}. ${mensajeLimpio}</Body>
+          <Body>${mensajeLimpio}</Body>
           <Media>${audioUrl}</Media>
         </Message>
       </Response>`);
@@ -87,7 +93,7 @@ app.all("/whatsapp", async (req, res) => {
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi está procesando tu sentir. Por favor intenta el audio una vez más.</Body>
+          <Body>Anesi está recalibrando su energía. Intenta enviarme un audio corto de nuevo.</Body>
         </Message>
       </Response>`);
   }
