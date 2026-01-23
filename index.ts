@@ -32,8 +32,8 @@ app.all("/whatsapp", async (req, res) => {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // CAMBIO CLAVE: Forzamos el nombre a .mp3 para que OpenAI lo acepte siempre
-      const file = await OpenAI.toFile(buffer, 'audio.mp3');
+      // SOLUCIÓN DE INGENIERÍA: Creamos un objeto de archivo compatible con los estándares de red modernos
+      const file = await OpenAI.toFile(buffer, 'audio.mp3', { type: 'audio/mpeg' });
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
@@ -45,19 +45,19 @@ app.all("/whatsapp", async (req, res) => {
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento. Responde con compasión en 2 frases y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento. Responde con compasión en 2 frases y termina con una de estas etiquetas exactas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
 
     const respuestaTexto = mentorResponse.choices[0].message.content || "";
     let emocion = "neutro";
-    const textoUpper = respuestaTexto.toUpperCase();
+    const tU = respuestaTexto.toUpperCase();
     
-    if (textoUpper.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
-    else if (textoUpper.includes("ANSIEDAD")) emocion = "ansiedad";
-    else if (textoUpper.includes("IRA")) emocion = "ira";
-    else if (textoUpper.includes("TRISTEZA")) emocion = "tristeza";
+    if (tU.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (tU.includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (tU.includes("IRA")) emocion = "ira";
+    else if (tU.includes("TRISTEZA")) emocion = "tristeza";
 
     const audioUrl = AUDIOS_BETA[emocion];
     const mensajeLimpio = respuestaTexto.replace(/\[.*?\]/g, "").trim();
@@ -72,12 +72,12 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error:", error.message);
+    // Si falla, ahora mandaremos el error real para no adivinar más
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi está procesando tu voz. Intenta un mensaje corto de nuevo.</Body>
+          <Body>Anesi detectó: ${error.message}. Por favor, reintenta con un audio corto.</Body>
         </Message>
       </Response>`);
   }
