@@ -21,30 +21,30 @@ const AUDIOS_BETA: any = {
 
 app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
-  // Limpiamos el número: quitamos el '+' si existe para estandarizar
-  const userPhoneRaw = From ? From.replace("whatsapp:", "") : "";
-  const userPhoneClean = userPhoneRaw.replace(/\+/g, "");
-
-  res.set("Content-Type", "text/xml");
+  const phoneFull = From ? From.replace("whatsapp:", "") : ""; // Ej: +593987654321
+  const phoneDigits = phoneFull.replace(/\D/g, ""); // Ej: 593987654321
+  const phoneShort = phoneDigits.slice(-9); // Ej: 987654321 (últimos dígitos)
 
   try {
-    // 1. BÚSQUEDA DE USUARIO (Intentamos con + y sin +)
+    // 1. BUSQUEDA TRIPLE DE USUARIO (Para que no falle el nombre)
     const { data: usuario } = await supabase
       .from('usuarios')
       .select('nombre')
-      .or(`telefono.eq.${userPhoneClean},telefono.eq.+${userPhoneClean}`)
+      .or(`telefono.eq.${phoneFull},telefono.eq.${phoneDigits},telefono.ilike.%${phoneShort}`)
       .maybeSingle();
 
-    const nombreFinal = usuario?.nombre || "corazón"; // Si no hay nombre, usa 'corazón' para que no sea frío
+    const nombreFinal = usuario?.nombre || "corazón";
 
+    // 2. DESCARGA Y TRANSCRIPCIÓN (Con límite de tiempo estricto)
     let mensajeTexto = Body || "";
 
-    // 2. PROCESAR AUDIO
     if (MediaUrl0) {
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+      
       const response = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` }
+        headers: { 'Authorization': `Basic ${twilioAuth}` },
+        timeout: 7000 // Si en 7 seg no baja, dispara error
       });
       
       const form = new FormData();
@@ -52,20 +52,20 @@ app.all("/whatsapp", async (req, res) => {
       form.append('model', 'whisper-1');
 
       const transcription = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
+        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() },
+        timeout: 10000
       });
       mensajeTexto = transcription.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO Y ALUCINACIONES (Bon Appetit, etc)
-    const palabrasBasura = ["bon appetit", "gracias por", "thank you", "subtitles", "de nada"];
-    const esBasura = palabrasBasura.some(p => mensajeTexto.toLowerCase().includes(p));
+    // 3. FILTRO DE SILENCIO / ALUCINACIONES
+    const basura = ["bon appetit", "gracias por ver", "thank you", "subtitles", "de nada", "placer"];
+    const esBasura = basura.some(p => mensajeTexto.toLowerCase().includes(p));
 
-    if (mensajeTexto.trim().length < 9 || esBasura) {
+    if (mensajeTexto.trim().length < 5 || esBasura) {
+      res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-          <Message><Body>Hola ${nombreFinal}. No pude escucharte bien. Si necesitas apoyo, por favor envíame un audio contándome qué sientes. ✨</Body></Message>
-        </Response>`);
+        <Response><Message><Body>Hola ${nombreFinal}. No logré escucharte bien. ¿Podrías repetirme qué sientes? ✨</Body></Message></Response>`);
     }
 
     // 4. IA MENTOR
@@ -74,7 +74,7 @@ app.all("/whatsapp", async (req, res) => {
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de paz. Saluda SIEMPRE por su nombre a ${nombreFinal}. Responde con compasión en 2 frases cortas. NUNCA uses "amigo" o "amiga". Etiqueta obligatoria: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
+          content: `Eres Anesi, Mentor de paz. Saluda por nombre a ${nombreFinal}. Responde con compasión en 2 frases. NO uses "amigo/a". Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
         },
         { role: "user", content: mensajeTexto }
       ]
@@ -89,6 +89,8 @@ app.all("/whatsapp", async (req, res) => {
 
     const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
 
+    // 5. RESPUESTA TwiML (Fijamos la cabecera antes)
+    res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message><Body>${mensajeLimpio}</Body></Message>
@@ -96,8 +98,10 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
+    console.error("ERROR:", error.message);
+    res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está conectando. Por favor intenta tu audio de nuevo.</Body></Message></Response>`);
+      <Response><Message><Body>Anesi está recalibrando su energía. Por favor intenta tu audio de nuevo.</Body></Message></Response>`);
   }
 });
 
