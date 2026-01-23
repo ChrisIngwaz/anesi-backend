@@ -1,4 +1,4 @@
-      import express from "express";
+import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 const fetch = require('node-fetch');
@@ -29,12 +29,13 @@ app.all("/whatsapp", async (req, res) => {
     let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
-      const response = await fetch(MediaUrl0);
-      const buffer = await response.buffer();
+      // DESCARGA ROBUSTA: Seguimos la redirección de Twilio para obtener el audio real
+      const response = await fetch(MediaUrl0, { redirect: 'follow' });
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       
-      // LA SOLUCIÓN MAESTRA: WhatsApp envía .ogg/opus. 
-      // OpenAI requiere que lo enviemos como 'audio.oga' para aceptarlo correctamente.
-      const file = await OpenAI.toFile(buffer, 'audio.oga', { type: 'audio/ogg' });
+      // CREACIÓN DE ARCHIVO VIRTUAL: Usamos 'audio.ogg' pero con el tipo exacto que Whisper ama
+      const file = await OpenAI.toFile(buffer, 'audio.ogg');
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
@@ -46,7 +47,7 @@ app.all("/whatsapp", async (req, res) => {
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Responde brevemente con sabiduría y termina con una de estas etiquetas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el dolor del usuario. Responde en 2 frases cortas y sabias. Termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -73,16 +74,17 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
+    console.error("DEBUG:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi está conectando con tu sentir. Intenta de nuevo con un audio corto.</Body>
+          <Body>Anesi está procesando tu sentir... (Error: ${error.message.substring(0, 40)})</Body>
         </Message>
       </Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("🚀 Anesi Online Activo"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0");
