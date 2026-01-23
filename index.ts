@@ -11,7 +11,7 @@ app.use(express.urlencoded({ extended: true }));
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const AUDIOS_BETA: any = {
+const AUDIOS: any = {
   agradecimiento: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/agradecimiento_v2.mp3",
   ansiedad: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/ansiedad_v2.mp3",
   ira: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/ira_v2.mp3",
@@ -21,89 +21,83 @@ const AUDIOS_BETA: any = {
 
 app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
-  const phoneFull = From ? From.replace("whatsapp:", "") : ""; // Ej: +593987654321
-  const phoneDigits = phoneFull.replace(/\D/g, ""); // Ej: 593987654321
-  const phoneShort = phoneDigits.slice(-9); // Ej: 987654321 (últimos dígitos)
+  const rawPhone = From ? From.replace("whatsapp:", "") : "";
+  const cleanPhone = rawPhone.replace(/\+/g, "");
 
   try {
-    // 1. BUSQUEDA TRIPLE DE USUARIO (Para que no falle el nombre)
+    // 1. BUSQUEDA RELÁMPAGO DE USUARIO
     const { data: usuario } = await supabase
       .from('usuarios')
       .select('nombre')
-      .or(`telefono.eq.${phoneFull},telefono.eq.${phoneDigits},telefono.ilike.%${phoneShort}`)
+      .or(`telefono.eq.${rawPhone},telefono.eq.${cleanPhone}`)
       .maybeSingle();
 
-    const nombreFinal = usuario?.nombre || "corazón";
+    const nombre = usuario?.nombre || "corazón";
+    let textoUser = Body || "";
 
-    // 2. DESCARGA Y TRANSCRIPCIÓN (Con límite de tiempo estricto)
-    let mensajeTexto = Body || "";
-
+    // 2. PROCESAMIENTO DE AUDIO ACELERADO
     if (MediaUrl0) {
-      const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+      const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
       
-      const response = await axios.get(MediaUrl0, {
+      const audioData = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` },
-        timeout: 7000 // Si en 7 seg no baja, dispara error
+        headers: { 'Authorization': `Basic ${auth}` },
+        timeout: 5000 // Máximo 5 seg para descargar
       });
       
       const form = new FormData();
-      form.append('file', Buffer.from(response.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
+      form.append('file', Buffer.from(audioData.data), { filename: 'v.ogg', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
 
-      const transcription = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+      const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
         headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() },
-        timeout: 10000
+        timeout: 8000 // Máximo 8 seg para transcribir
       });
-      mensajeTexto = transcription.data.text || "";
+      textoUser = whisper.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO / ALUCINACIONES
-    const basura = ["bon appetit", "gracias por ver", "thank you", "subtitles", "de nada", "placer"];
-    const esBasura = basura.some(p => mensajeTexto.toLowerCase().includes(p));
+    // 3. DETECTOR DE SILENCIO / ALUCINACIÓN (Whisper suele decir "Gracias" o "Bon appetit" en silencio)
+    const basura = ["bon appetit", "gracias", "thank you", "placer", "subtitles", "bye"];
+    const esBasura = basura.some(b => textoUser.toLowerCase().includes(b)) && textoUser.length < 25;
 
-    if (mensajeTexto.trim().length < 5 || esBasura) {
+    if (textoUser.trim().length < 5 || esBasura) {
       res.set("Content-Type", "text/xml");
-      return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-        <Response><Message><Body>Hola ${nombreFinal}. No logré escucharte bien. ¿Podrías repetirme qué sientes? ✨</Body></Message></Response>`);
+      return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>Hola ${nombre}. No logré escucharte bien. Repíteme qué sientes, por favor. ✨</Body></Message></Response>`);
     }
 
-    // 4. IA MENTOR
-    const mentorRes = await openai.chat.completions.create({
+    // 4. GPT-4o-MINI: RESPUESTA ULTRA-CORTA PARA GANAR TIEMPO
+    const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { 
-          role: "system", 
-          content: `Eres Anesi, Mentor de paz. Saluda por nombre a ${nombreFinal}. Responde con compasión en 2 frases. NO uses "amigo/a". Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
-        },
-        { role: "user", content: mensajeTexto }
-      ]
+        { role: "system", content: `Eres Anesi. Saluda a ${nombre}. Responde con paz en 15 palabras máximo. Usa etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
+        { role: "user", content: textoUser }
+      ],
+      max_tokens: 60
     });
 
-    const respuestaRaw = mentorRes.choices[0].message.content || "";
+    const resIA = ai.choices[0].message.content || "";
     let emocion = "neutro";
-    if (respuestaRaw.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
-    else if (respuestaRaw.includes("ANSIEDAD")) emocion = "ansiedad";
-    else if (respuestaRaw.includes("IRA")) emocion = "ira";
-    else if (respuestaRaw.includes("TRISTEZA")) emocion = "tristeza";
+    if (resIA.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (resIA.includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (resIA.includes("IRA")) emocion = "ira";
+    else if (resIA.includes("TRISTEZA")) emocion = "tristeza";
 
-    const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
+    const msg = resIA.replace(/\[.*?\]/g, "").trim();
 
-    // 5. RESPUESTA TwiML (Fijamos la cabecera antes)
+    // 5. RESPUESTA FINAL
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
-        <Message><Body>${mensajeLimpio}</Body></Message>
-        <Message><Media>${AUDIOS_BETA[emocion]}</Media></Message>
+        <Message><Body>${msg}</Body></Message>
+        <Message><Media>${AUDIOS[emocion]}</Media></Message>
       </Response>`);
 
   } catch (error: any) {
-    console.error("ERROR:", error.message);
+    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
-    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está recalibrando su energía. Por favor intenta tu audio de nuevo.</Body></Message></Response>`);
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>Anesi está conectando. Intenta de nuevo, por favor.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("OK"));
 app.listen(process.env.PORT || 3000);
