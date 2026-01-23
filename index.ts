@@ -32,8 +32,9 @@ app.all("/whatsapp", async (req, res) => {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // SOLUCIÓN DE INGENIERÍA: Creamos un objeto de archivo compatible con los estándares de red modernos
-      const file = await OpenAI.toFile(buffer, 'audio.mp3', { type: 'audio/mpeg' });
+      // CONFIGURACIÓN DE ALTA COMPATIBILIDAD
+      // Convertimos el audio en un formato que OpenAI reconoce obligatoriamente
+      const file = await OpenAI.toFile(buffer, 'input.wav');
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
@@ -72,12 +73,12 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    // Si falla, ahora mandaremos el error real para no adivinar más
+    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi detectó: ${error.message}. Por favor, reintenta con un audio corto.</Body>
+          <Body>Anesi detectó un detalle técnico: ${error.message}. Intenta un audio corto de nuevo.</Body>
         </Message>
       </Response>`);
   }
