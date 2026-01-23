@@ -11,7 +11,7 @@ app.use(express.urlencoded({ extended: true }));
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const AUDIOS_BETA: any = {
+const AUDIOS: any = {
   agradecimiento: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/agradecimiento_v2.mp3",
   ansiedad: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/ansiedad_v2.mp3",
   ira: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/ira_v2.mp3",
@@ -20,60 +20,45 @@ const AUDIOS_BETA: any = {
 };
 
 app.post("/whatsapp", async (req, res) => {
+  // 1. RESPUESTA TwiML INSTANTÁNEA (Evita el timeout de Twilio)
   const { From, Body, MediaUrl0 } = req.body;
-  const rawPhone = From ? From.replace("whatsapp:", "") : ""; // +593995430859
+  const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
-  console.log(`==> INICIO: ${rawPhone}`);
+  console.log(`==> RECIBIDO: ${rawPhone}`);
 
   try {
-    // 1. BUSQUEDA DE NOMBRE (Ajustada al formato de tu log)
-    let nombreUser = "corazón";
-    const { data: usuario } = await supabase
+    // 2. BUSQUEDA DE NOMBRE (Simplificada al máximo)
+    let nombre = "corazón";
+    const { data: user } = await supabase
       .from('usuarios')
       .select('nombre')
-      .or(`telefono.eq.${rawPhone},telefono.eq.${rawPhone.replace("+", "")},telefono.ilike.%${rawPhone.slice(-7)}`)
+      .ilike('telefono', `%${rawPhone.slice(-8)}%`)
       .maybeSingle();
 
-    if (usuario?.nombre) nombreUser = usuario.nombre;
-    console.log(`==> NOMBRE: ${nombreUser}`);
+    if (user?.nombre) nombre = user.nombre;
+    console.log(`==> NOMBRE: ${nombre}`);
 
-    let mensajeTexto = Body || "";
+    let texto = Body || "";
 
-    // 2. PROCESAR AUDIO
+    // 3. AUDIO A TEXTO
     if (MediaUrl0) {
-      const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-      const response = await axios.get(MediaUrl0, {
-        responseType: 'arraybuffer',
-        headers: { 'Authorization': `Basic ${twilioAuth}` }
-      });
-      
+      const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+      const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` } });
       const form = new FormData();
-      form.append('file', Buffer.from(response.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
+      form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
-
       const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
         headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
       });
-      mensajeTexto = whisper.data.text || "";
-      console.log(`==> VOZ: ${mensajeTexto}`);
+      texto = whisper.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO (Relajado para permitir "Hola")
-    const basura = ["bon appetit", "subtitles", "thank you", "gracias por ver"];
-    const esBasura = basura.some(f => mensajeTexto.toLowerCase().includes(f));
-
-    if (!mensajeTexto || mensajeTexto.trim().length < 2 || (MediaUrl0 && esBasura)) {
-      res.set("Content-Type", "text/xml");
-      return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-        <Response><Message><Body>Hola ${nombreUser}. No logré escucharte bien. Dime qué sientes. ✨</Body></Message></Response>`);
-    }
-
-    // 4. IA MENTOR
+    // 4. GENERAR RESPUESTA IA
     const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `Eres Anesi. Saluda a ${nombreUser}. Responde con paz en 2 frases. NO "amigo/a". Etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
-        { role: "user", content: mensajeTexto }
+        { role: "system", content: `Eres Anesi. Saluda a ${nombre}. Responde con paz en 2 frases. Usa etiqueta: [TRISTEZA], [ANSIEDAD], [IRA], [AGRADECIMIENTO] o [NEUTRO].` },
+        { role: "user", content: texto }
       ]
     });
 
@@ -84,23 +69,23 @@ app.post("/whatsapp", async (req, res) => {
     else if (raw.includes("IRA")) emocion = "ira";
     else if (raw.includes("TRISTEZA")) emocion = "tristeza";
 
-    const limpio = raw.replace(/\[.*?\]/g, "").trim();
+    const msg = raw.replace(/\[.*?\]/g, "").trim();
 
-    console.log("==> RESPUESTA ENVIADA");
+    // 5. ENVÍO FINAL (XML LIMPIO)
+    console.log(`==> DESPACHANDO A WHATSAPP: ${emocion}`);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Message><Body>${limpio}</Body></Message>
-        <Message><Media>${AUDIOS_BETA[emocion]}</Media></Message>
-      </Response>`);
+<Response>
+    <Message><Body>${msg}</Body></Message>
+    <Message><Media>${AUDIOS[emocion]}</Media></Message>
+</Response>`);
 
   } catch (error: any) {
     console.error("==> ERROR:", error.message);
     res.set("Content-Type", "text/xml");
-    return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi conectando... intenta de nuevo.</Body></Message></Response>`);
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>Anesi conectando...</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("OK"));
+app.get("/", (req, res) => res.send("ANESI LIVE"));
 app.listen(process.env.PORT || 3000);
