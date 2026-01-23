@@ -38,7 +38,7 @@ app.all("/whatsapp", async (req, res) => {
       
       const buffer = Buffer.from(response.data);
       const form = new FormData();
-      form.append('file', buffer, { filename: 'voice.ogg', contentType: 'audio/ogg' });
+      form.append('file', buffer, { filename: 'voice.oga', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
 
       const transcriptionRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
@@ -48,9 +48,11 @@ app.all("/whatsapp", async (req, res) => {
       mensajeTexto = transcriptionRes.data.text || "";
     }
 
-    // --- FILTRO DE SILENCIO / RUIDO SIN SENTIDO ---
-    // Si la transcripción es muy corta o está vacía, enviamos el mensaje de ayuda.
-    if (mensajeTexto.trim().length < 8) {
+    // --- FILTRO MEJORADO DE SILENCIO Y ALUCINACIONES ---
+    const frasesAlucinadas = ["gracias por ver", "subtitles by", "gracias.", "thank you.", "de nada.", "hola."];
+    const esAlucinacion = frasesAlucinadas.some(f => mensajeTexto.toLowerCase().trim() === f);
+
+    if (mensajeTexto.trim().length < 10 || esAlucinacion) {
       res.set("Content-Type", "text/xml");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -79,28 +81,17 @@ app.all("/whatsapp", async (req, res) => {
     const audioUrl = AUDIOS_BETA[emocion];
     const mensajeLimpio = respuestaTextoRaw.replace(/\[.*?\]/g, "").trim();
 
-    // --- SOLUCIÓN PARA EL TEXTO Y AUDIO ---
-    // Twilio a veces falla al enviar texto + media en un solo <Message>. 
-    // Los separamos en dos etiquetas <Message> para que lleguen como dos globos de texto seguidos.
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
-        <Message>
-          <Body>${mensajeLimpio}</Body>
-        </Message>
-        <Message>
-          <Media>${audioUrl}</Media>
-        </Message>
+        <Message><Body>${mensajeLimpio}</Body></Message>
+        <Message><Media>${audioUrl}</Media></Message>
       </Response>`);
 
   } catch (error: any) {
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Message>
-          <Body>Anesi está recalibrando su energía. Intenta enviarme un audio corto de nuevo.</Body>
-        </Message>
-      </Response>`);
+      <Response><Message><Body>Anesi está recalibrando su energía. Intenta de nuevo.</Body></Message></Response>`);
   }
 });
 
