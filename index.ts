@@ -23,17 +23,19 @@ app.all("/whatsapp", async (req, res) => {
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
+    // 1. Identificación del usuario
     const { data: usuario } = await supabase.from('usuarios').select('*').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
     if (!usuario) return res.status(200).send("OK");
 
     let mensajeTexto = Body || "";
 
+    // 2. Procesamiento de Audio con Buffer Directo
     if (MediaUrl0) {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // Creamos el archivo de forma compatible para la API
-      const file = await OpenAI.toFile(buffer, "audio.wav");
+      // Creamos el archivo virtual con el nombre correcto para Whisper
+      const file = await OpenAI.toFile(buffer, "audio.ogg");
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
@@ -42,41 +44,44 @@ app.all("/whatsapp", async (req, res) => {
       mensajeTexto = transcription.text;
     }
 
+    // 3. Respuesta de Anesi (IA)
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor Transformador. Identifica el dolor del usuario (ira, ansiedad, tristeza, agradecimiento o neutro). Responde con compasión en 2 frases y añade al final la etiqueta: [DOLOR]." },
         { role: "user", content: mensajeTexto }
       ]
     });
 
     const respuestaTexto = mentorResponse.choices[0].message.content || "";
+    
+    // 4. Lógica de selección de Audio
     let emocion = "neutro";
-    if (respuestaTexto.includes("[AGRADECIMIENTO]")) emocion = "agradecimiento";
-    else if (respuestaTexto.includes("[ANSIEDAD]")) emocion = "ansiedad";
-    else if (respuestaTexto.includes("[IRA]")) emocion = "ira";
-    else if (respuestaTexto.includes("[TRISTEZA]")) emocion = "tristeza";
+    if (respuestaTexto.toUpperCase().includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (respuestaTexto.toUpperCase().includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (respuestaTexto.toUpperCase().includes("IRA")) emocion = "ira";
+    else if (respuestaTexto.toUpperCase().includes("TRISTEZA")) emocion = "tristeza";
 
     const audioUrl = AUDIOS_BETA[emocion];
     const mensajeLimpio = respuestaTexto.replace(/\[.*?\]/g, "").trim();
 
-    const twiml = `
+    // 5. Respuesta TwiML
+    res.set("Content-Type", "text/xml");
+    return res.send(`
       <Response>
         <Message>
           <Body>Hola ${usuario.nombre}. ${mensajeLimpio}</Body>
           <Media>${audioUrl}</Media>
         </Message>
-      </Response>`;
-
-    return res.type("text/xml").send(twiml);
+      </Response>`);
 
   } catch (error: any) {
-    // Si hay error, Anesi te avisará por WhatsApp qué pasó
-    const errorTwiml = `<Response><Message><Body>Aviso técnico: ${error.message}</Body></Message></Response>`;
-    return res.type("text/xml").send(errorTwiml);
+    console.error("Fallo:", error.message);
+    res.set("Content-Type", "text/xml");
+    return res.send(`<Response><Message><Body>Anesi está recalibrando sus sensores. Por favor, intenta enviar tu mensaje de voz de nuevo.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("🚀 Anesi Online está en línea"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0");
