@@ -1,4 +1,4 @@
-import express from "express";
+      import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 const fetch = require('node-fetch');
@@ -32,9 +32,9 @@ app.all("/whatsapp", async (req, res) => {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // CONFIGURACIÓN DE ALTA COMPATIBILIDAD
-      // Convertimos el audio en un formato que OpenAI reconoce obligatoriamente
-      const file = await OpenAI.toFile(buffer, 'input.wav');
+      // LA SOLUCIÓN MAESTRA: WhatsApp envía .ogg/opus. 
+      // OpenAI requiere que lo enviemos como 'audio.oga' para aceptarlo correctamente.
+      const file = await OpenAI.toFile(buffer, 'audio.oga', { type: 'audio/ogg' });
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
@@ -46,7 +46,7 @@ app.all("/whatsapp", async (req, res) => {
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento. Responde con compasión en 2 frases y termina con una de estas etiquetas exactas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Responde brevemente con sabiduría y termina con una de estas etiquetas: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -73,12 +73,11 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi detectó un detalle técnico: ${error.message}. Intenta un audio corto de nuevo.</Body>
+          <Body>Anesi está conectando con tu sentir. Intenta de nuevo con un audio corto.</Body>
         </Message>
       </Response>`);
   }
