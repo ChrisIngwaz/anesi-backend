@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 const fetch = require('node-fetch');
 const FormData = require('form-data');
+const { Readable } = require('stream');
 
 const app = express();
 app.use(express.json());
@@ -30,42 +31,26 @@ app.all("/whatsapp", async (req, res) => {
     let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
-      // 1. Descarga el audio con seguimiento de redirección
-      const response = await fetch(MediaUrl0, { redirect: 'follow' });
+      // 1. Descargamos el audio como Buffer
+      const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // 2. Construcción manual del FormData (Método Infalible)
-      const form = new FormData();
-      // Usamos .oga que es el estándar de oro para WhatsApp -> Whisper
-      form.append('file', buffer, {
-        filename: 'voice.oga',
-        contentType: 'audio/ogg',
-      });
-      form.append('model', 'whisper-1');
+      // 2. Creamos un Stream para que OpenAI lo lea como un archivo real
+      const stream = Readable.from(buffer);
+      stream.path = 'voice.ogg'; // Truco crucial: Whisper necesita una propiedad 'path' o 'filename'
 
-      const transcriptionRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          ...form.getHeaders(),
-        },
-        body: form,
+      // 3. Enviamos usando la librería oficial de forma optimizada
+      const transcription = await openai.audio.transcriptions.create({
+        file: stream,
+        model: "whisper-1",
       });
-
-      const transcriptionData = await transcriptionRes.json();
-      
-      if (transcriptionData.error) {
-        throw new Error(transcriptionData.error.message);
-      }
-      
-      mensajeTexto = transcriptionData.text;
+      mensajeTexto = transcription.text;
     }
 
-    // 3. Procesamiento con el Mentor Anesi
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento (IRA, ANSIEDAD, TRISTEZA, AGRADECIMIENTO o NEUTRO). Responde con compasión en 2 frases y añade la etiqueta al final." },
+        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde en 2 frases cortas y añade al final una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -91,11 +76,12 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
+    console.error("Error:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi detectó: ${error.message.substring(0, 60)}</Body>
+          <Body>Anesi está procesando tu voz... (${error.message.substring(0,30)})</Body>
         </Message>
       </Response>`);
   }
@@ -103,4 +89,4 @@ app.all("/whatsapp", async (req, res) => {
 
 app.get("/", (req, res) => res.send("🚀 Anesi Online"));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0");      
+app.listen(PORT, "0.0.0.0");
