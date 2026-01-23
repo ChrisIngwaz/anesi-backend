@@ -19,94 +19,102 @@ const AUDIOS_BETA: any = {
   neutro: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/neutro_v2.mp3"
 };
 
-app.all("/whatsapp", async (req, res) => {
+app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
-  const rawPhone = From ? From.replace("whatsapp:", "") : ""; // +593995430859
+  const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
-  console.log(`Procesando mensaje de: ${rawPhone}`);
+  console.log(`==> INICIO PROCESO: ${rawPhone}`);
 
   try {
-    // 1. BUSCAR USUARIO (Si falla la DB, seguimos con un nombre genérico para no romper el flujo)
+    // 1. BÚSQUEDA DE USUARIO CON TIMEOUT (Para que no se trabe)
     let nombreUser = "corazón";
     try {
-      const { data: usuario } = await supabase
+      const userPromise = supabase
         .from('usuarios')
         .select('nombre')
-        .or(`telefono.eq.${rawPhone},telefono.eq.${rawPhone.replace("+", "")},telefono.ilike.%${rawPhone.slice(-9)}%`)
+        .or(`telefono.eq.${rawPhone},telefono.eq.${rawPhone.replace("+", "")}`)
         .maybeSingle();
-      
+
+      // Si la DB no responde en 4 segundos, saltamos al catch
+      const { data: usuario } = await Promise.race([
+        userPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout DB')), 4000))
+      ]) as any;
+
       if (usuario?.nombre) nombreUser = usuario.nombre;
-    } catch (dbErr) {
-      console.log("Error en DB, usando nombre genérico");
+      console.log(`==> USUARIO ENCONTRADO: ${nombreUser}`);
+    } catch (e) {
+      console.log("==> DB LENTA O ERROR: Usando nombre genérico");
     }
 
     let mensajeTexto = Body || "";
 
     // 2. PROCESAR AUDIO
     if (MediaUrl0) {
+      console.log("==> DESCARGANDO AUDIO...");
       const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-      const audioRes = await axios.get(MediaUrl0, {
+      const response = await axios.get(MediaUrl0, {
         responseType: 'arraybuffer',
         headers: { 'Authorization': `Basic ${twilioAuth}` },
-        timeout: 10000 // 10 segundos máximo para descargar
+        timeout: 8000
       });
       
       const form = new FormData();
-      form.append('file', Buffer.from(audioRes.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
+      form.append('file', Buffer.from(response.data), { filename: 'voice.oga', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
 
-      const whisperRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+      console.log("==> TRANSCRIBIENDO CON OPENAI...");
+      const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
         headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
       });
-      mensajeTexto = whisperRes.data.text || "";
+      mensajeTexto = whisper.data.text || "";
     }
 
-    // 3. FILTRO DE SILENCIO / ALUCINACIONES
-    const basura = ["bon appetit", "gracias por ver", "subtitles", "thank you", "de nada", "hola."];
+    // 3. FILTRO DE SILENCIO / BASURA
+    const basura = ["bon appetit", "gracias por ver", "subtitles", "thank you", "de nada"];
     const esBasura = basura.some(f => mensajeTexto.toLowerCase().includes(f));
 
     res.set("Content-Type", "text/xml");
 
-    if (mensajeTexto.trim().length < 7 || (MediaUrl0 && esBasura && mensajeTexto.length < 25)) {
+    if (mensajeTexto.trim().length < 5 || esBasura) {
+      console.log("==> FILTRADO POR SILENCIO/BASURA");
       return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-        <Response><Message><Body>Hola ${nombreUser}. No logré escucharte bien. Por favor, dime qué sientes. ✨</Body></Message></Response>`);
+        <Response><Message><Body>Hola ${nombreUser}. No pude escucharte bien. Dime qué sientes, por favor. ✨</Body></Message></Response>`);
     }
 
-    // 4. IA MENTOR
-    const mentorResponse = await openai.chat.completions.create({
+    // 4. RESPUESTA IA
+    console.log("==> GENERANDO RESPUESTA IA...");
+    const ai = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { 
-          role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. Responde a ${nombreUser} con paz en 2 frases. NO uses "amigo/a". Termina con etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` 
-        },
+        { role: "system", content: `Eres Anesi. Saluda a ${nombreUser}. Responde con paz en 2 frases. NO uses "amigo/a". Etiqueta final: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO].` },
         { role: "user", content: mensajeTexto }
       ]
     });
 
-    const respuestaRaw = mentorResponse.choices[0].message.content || "";
+    const raw = ai.choices[0].message.content || "";
     let emocion = "neutro";
-    if (respuestaRaw.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
-    else if (respuestaRaw.includes("ANSIEDAD")) emocion = "ansiedad";
-    else if (respuestaRaw.includes("IRA")) emocion = "ira";
-    else if (respuestaRaw.includes("TRISTEZA")) emocion = "tristeza";
+    if (raw.includes("AGRADECIMIENTO")) emocion = "agradecimiento";
+    else if (raw.includes("ANSIEDAD")) emocion = "ansiedad";
+    else if (raw.includes("IRA")) emocion = "ira";
+    else if (raw.includes("TRISTEZA")) emocion = "tristeza";
 
-    const mensajeLimpio = respuestaRaw.replace(/\[.*?\]/g, "").trim();
+    const limpio = raw.replace(/\[.*?\]/g, "").trim();
 
-    // 5. RESPUESTA FINAL
+    console.log("==> ENVIANDO RESPUESTA FINAL");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
-        <Message><Body>${mensajeLimpio}</Body></Message>
+        <Message><Body>${limpio}</Body></Message>
         <Message><Media>${AUDIOS_BETA[emocion]}</Media></Message>
       </Response>`);
 
   } catch (error: any) {
-    console.error("ERROR CRÍTICO:", error.message);
+    console.error("==> ERROR CRÍTICO:", error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
-      <Response><Message><Body>Anesi está conectando... Por favor intenta tu mensaje de nuevo.</Body></Message></Response>`);
+      <Response><Message><Body>Anesi está conectando su energía. Intenta de nuevo, por favor.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("🚀 Anesi Online"));
+app.get("/", (req, res) => res.send("OK"));
 app.listen(process.env.PORT || 3000);
