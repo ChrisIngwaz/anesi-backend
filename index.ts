@@ -1,6 +1,6 @@
 import express from "express";
 import { createClient } from '@supabase/supabase-js';
-import OpenAI, { toFile } from "openai";
+import OpenAI from "openai";
 const fetch = require('node-fetch');
 
 const app = express();
@@ -18,8 +18,6 @@ const AUDIOS_BETA: any = {
   neutro: "https://txuwjkkwnezfqpromber.supabase.co/storage/v1/object/public/audios/neutro_v2.mp3"
 };
 
-app.get("/", (req, res) => res.send("<h1>🚀 Anesi Online Activo</h1>"));
-
 app.all("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
@@ -28,27 +26,27 @@ app.all("/whatsapp", async (req, res) => {
     const { data: usuario } = await supabase.from('usuarios').select('*').or(`telefono.eq.${userPhone},telefono.eq.+${userPhone}`).single();
     if (!usuario) return res.status(200).send("OK");
 
-    let mensajeUsuario = Body || "";
+    let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
       const response = await fetch(MediaUrl0);
       const buffer = await response.buffer();
       
-      // Convertimos el audio directamente para OpenAI sin usar archivos temporales en disco
-      const file = await toFile(buffer, "audio.ogg");
+      // Creamos el archivo de forma compatible para la API
+      const file = await OpenAI.toFile(buffer, "audio.wav");
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
         model: "whisper-1",
       });
-      mensajeUsuario = transcription.text;
+      mensajeTexto = transcription.text;
     }
 
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y añade: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
-        { role: "user", content: mensajeUsuario }
+        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "user", content: mensajeTexto }
       ]
     });
 
@@ -60,20 +58,25 @@ app.all("/whatsapp", async (req, res) => {
     else if (respuestaTexto.includes("[TRISTEZA]")) emocion = "tristeza";
 
     const audioUrl = AUDIOS_BETA[emocion];
+    const mensajeLimpio = respuestaTexto.replace(/\[.*?\]/g, "").trim();
 
-    return res.type("text/xml").send(`
+    const twiml = `
       <Response>
         <Message>
-          <Body>Hola ${usuario.nombre}. He analizado tu mensaje. Escucha este ejercicio:</Body>
+          <Body>Hola ${usuario.nombre}. ${mensajeLimpio}</Body>
           <Media>${audioUrl}</Media>
         </Message>
-      </Response>`);
+      </Response>`;
+
+    return res.type("text/xml").send(twiml);
 
   } catch (error: any) {
-    console.error("ERROR:", error.message);
-    return res.status(200).send("OK");
+    // Si hay error, Anesi te avisará por WhatsApp qué pasó
+    const errorTwiml = `<Response><Message><Body>Aviso técnico: ${error.message}</Body></Message></Response>`;
+    return res.type("text/xml").send(errorTwiml);
   }
 });
 
+app.get("/", (req, res) => res.send("🚀 Anesi Online"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0");
