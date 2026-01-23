@@ -30,20 +30,19 @@ app.all("/whatsapp", async (req, res) => {
     let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
-      // 1. Descarga del audio con manejo de flujo
-      const response = await fetch(MediaUrl0);
+      // 1. Descarga el audio con seguimiento de redirección
+      const response = await fetch(MediaUrl0, { redirect: 'follow' });
       const buffer = await response.buffer();
       
-      // 2. Creación de un formulario real (Form-Data) para OpenAI
-      // Esto simula un archivo físico real que la IA NO PUEDE RECHAZAR
+      // 2. Construcción manual del FormData (Método Infalible)
       const form = new FormData();
+      // Usamos .oga que es el estándar de oro para WhatsApp -> Whisper
       form.append('file', buffer, {
-        filename: 'audio.ogg',
+        filename: 'voice.oga',
         contentType: 'audio/ogg',
       });
       form.append('model', 'whisper-1');
 
-      // 3. Envío manual a la API de transcripción
       const transcriptionRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
@@ -56,17 +55,17 @@ app.all("/whatsapp", async (req, res) => {
       const transcriptionData = await transcriptionRes.json();
       
       if (transcriptionData.error) {
-        throw new Error(`OpenAI Whisper Error: ${transcriptionData.error.message}`);
+        throw new Error(transcriptionData.error.message);
       }
       
       mensajeTexto = transcriptionData.text;
     }
 
-    // 4. Procesamiento con el Mentor
+    // 3. Procesamiento con el Mentor Anesi
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento (IRA, ANSIEDAD, TRISTEZA, AGRADECIMIENTO o NEUTRO). Responde con compasión en 2 frases y añade la etiqueta al final." },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -104,4 +103,4 @@ app.all("/whatsapp", async (req, res) => {
 
 app.get("/", (req, res) => res.send("🚀 Anesi Online"));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0");
+app.listen(PORT, "0.0.0.0");      
