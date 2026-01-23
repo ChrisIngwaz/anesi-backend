@@ -20,7 +20,7 @@ const AUDIOS_BETA: any = {
 };
 
 app.all("/whatsapp", async (req, res) => {
-  const { From, Body, MediaUrl0 } = req.body;
+  const { From, Body, MediaUrl0, AccountSid } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
@@ -30,19 +30,20 @@ app.all("/whatsapp", async (req, res) => {
     let mensajeTexto = Body || "";
 
     if (MediaUrl0) {
-      // 1. Descarga el audio usando Axios para obtener un Buffer puro
-      const response = await axios.get(MediaUrl0, { responseType: 'arraybuffer' });
-      const buffer = Buffer.from(response.data);
+      // CLAVE: Twilio requiere Auth para descargar archivos. 
+      // Usamos el AccountSid y el AuthToken que ya tienes en tus variables.
+      const twilioAuth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
       
-      // 2. Construcción manual del Form-Data según especificación técnica de Whisper
-      const form = new FormData();
-      form.append('file', buffer, {
-        filename: 'voice.ogg',
-        contentType: 'audio/ogg',
+      const response = await axios.get(MediaUrl0, {
+        responseType: 'arraybuffer',
+        headers: { 'Authorization': `Basic ${twilioAuth}` }
       });
+      
+      const buffer = Buffer.from(response.data);
+      const form = new FormData();
+      form.append('file', buffer, { filename: 'voice.ogg', contentType: 'audio/ogg' });
       form.append('model', 'whisper-1');
 
-      // 3. Envío directo a OpenAI mediante Axios (más estable para archivos)
       const transcriptionRes = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
         headers: {
           'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -53,11 +54,10 @@ app.all("/whatsapp", async (req, res) => {
       mensajeTexto = transcriptionRes.data.text;
     }
 
-    // 4. Inteligencia de Anesi
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, el Mentor de los 3 Cerebros. Identifica el sentimiento. Responde en 2 frases y añade la etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Responde brevemente y termina con: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeTexto }
       ]
     });
@@ -83,12 +83,11 @@ app.all("/whatsapp", async (req, res) => {
       </Response>`);
 
   } catch (error: any) {
-    console.error("Error completo:", error.response?.data || error.message);
     res.set("Content-Type", "text/xml");
     return res.send(`<?xml version="1.0" encoding="UTF-8"?>
       <Response>
         <Message>
-          <Body>Anesi está conectando... Por favor intenta el audio una vez más.</Body>
+          <Body>Anesi está procesando tu sentir. Por favor intenta el audio una vez más.</Body>
         </Message>
       </Response>`);
   }
