@@ -1,6 +1,8 @@
 import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
+import fs from "fs";
+import path from "path";
 const fetch = require('node-fetch');
 
 const app = express();
@@ -21,7 +23,7 @@ const AUDIOS_BETA: any = {
 app.get("/", (req, res) => res.send("<h1>🚀 Anesi Online - Fase Beta</h1>"));
 
 app.all("/whatsapp", async (req, res) => {
-  const { From, Body, MediaUrl0, MediaContentType0 } = req.body;
+  const { From, Body, MediaUrl0 } = req.body;
   const userPhone = From ? From.replace(/\D/g, "") : "";
 
   try {
@@ -35,29 +37,29 @@ app.all("/whatsapp", async (req, res) => {
 
     let mensajeUsuario = Body || "";
 
-    // PROCESAMIENTO DE AUDIO MEJORADO
     if (MediaUrl0) {
-      console.log("Descargando audio de Twilio...");
+      console.log("Descargando audio...");
       const response = await fetch(MediaUrl0);
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      // Creamos un archivo virtual que OpenAI entienda
-      const file = await OpenAI.toFile(buffer, `audio.ogg`, { type: MediaContentType0 });
+      const buffer = await response.buffer();
+      
+      // Creamos un archivo temporal real para asegurar la compatibilidad
+      const tempPath = path.join("/tmp", `audio_${Date.now()}.ogg`);
+      fs.writeFileSync(tempPath, buffer);
 
       const transcription = await openai.audio.transcriptions.create({
-        file: file,
+        file: fs.createReadStream(tempPath),
         model: "whisper-1",
       });
+      
       mensajeUsuario = transcription.text;
-      console.log("Transcripción exitosa:", mensajeUsuario);
+      fs.unlinkSync(tempPath); // Borramos el temporal
+      console.log("Transcripción lograda.");
     }
 
-    // ANÁLISIS DEL MENTOR
     const mentorResponse = await openai.chat.completions.create({
       model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Analiza el dolor del usuario. Responde brevemente y añade al final una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
+        { role: "system", content: "Eres Anesi, Mentor de los 3 Cerebros. Analiza el dolor del usuario. Responde muy brevemente (máximo 2 frases) y añade al final una etiqueta: [AGRADECIMIENTO], [ANSIEDAD], [IRA], [TRISTEZA] o [NEUTRO]." },
         { role: "user", content: mensajeUsuario }
       ]
     });
@@ -83,9 +85,8 @@ app.all("/whatsapp", async (req, res) => {
     return res.type("text/xml").send(responseXml);
 
   } catch (error: any) {
-    console.error("ERROR EN EL CEREBRO DE ANESI:", error.message);
-    // Mensaje amigable para el usuario si algo falla
-    return res.type("text/xml").send("<Response><Message><Body>Lo siento, no pude procesar el audio. ¿Podrías intentar grabarlo de nuevo?</Body></Message></Response>");
+    console.error("ERROR DETALLADO:", error.message);
+    return res.type("text/xml").send("<Response><Message><Body>Lo siento, Anesi está procesando mucha información. ¿Podrías intentar el audio una vez más?</Body></Message></Response>");
   }
 });
 
