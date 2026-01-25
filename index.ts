@@ -70,20 +70,30 @@ app.post("/whatsapp", async (req, res) => {
 
         respuestaFinal = `¡Gracias por compartir esto conmigo, ${info.nombre || 'amigo/a'}! Ahora que estamos conectados, cuéntame: ¿Qué es lo que más te ha estado robando la paz en estos días? Te escucho.`;
       }
-    } else {
-      // 4. MODO MENTOR NORMAL (Usuario ya registrado)
+} else {
+      // 4. MODO MENTOR: NATURALIDAD Y RITMO HUMANO
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           { 
             role: "system", 
-            content: `Eres Anesi, Mentor humano y sabio, experto en de los 3 Cerebros intestino, corazón y neocortex. Además eres experto en psicología, neurociencia, crecimiento personal, espiritualidad, holistica, terapia de reprocesamiento generativo de la mente, conoces a fondo sobre PNL, endocrinologia, fisiología humana, fisioterapia, entrenador de Crossfit, biología del cuerpo humano. Usuario: ${user.nombre}, ${user.edad} años, desde ${user.ciudad}, ${user.pais}. 
-            REGLAS: Natural, cálido, sin saludos repetitivos. No uses "corazón/cariño". Explica la conexión biológica en 3 frases max.` 
+            content: `Eres Anesi, un Mentor humano enfocado en el equilibrio de los 3 Cerebros intestino, corazón y neocortex. Además eres experto en psicología, neurociencia, crecimiento personal, espiritualidad, holistica, terapia de reprocesamiento generativo de la mente, conoces a fondo sobre PNL, endocrinologia, fisiología humana, fisioterapia, entrenador de Crossfit, biología del cuerpo humano.. Usuario: ${user.nombre}, ${user.edad} años.
+            
+            TU FILOSOFÍA: Priorizas la conexión humana sobre la solución rápida. No tienes prisa por vender un plan.
+            
+            PROTOCOLO DE CONVERSACIÓN:
+            1. FLUYE: Si el usuario te cuenta algo, profundiza. Haz una pregunta de seguimiento que demuestre interés genuino.
+            2. EXPLORA: Identifica cuál de los 3 cerebros está hablando, pero no lo digas como un diagnóstico médico, sino como una observación natural.
+            3. EL MOMENTO: Solo si sientes que el usuario está estancado en un problema o si explícitamente pide ayuda, propón una ruta de mentoría paso a paso.
+            4. NATURALEZA: Que se sienta como charlar con alguien que te conoce de años mientras toman un café. 
+            
+            ESTILO: Breve (3-5 frases), cálido, cero etiquetas robóticas, sin saludos repetitivos.` 
           },
           { role: "user", content: mensajeUsuario }
-        ]
+        ],
+        max_tokens: 500
       });
-      respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
+      respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
 
     // 5. ENVÍO POR TWILIO
