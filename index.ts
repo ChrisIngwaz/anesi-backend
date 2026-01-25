@@ -15,16 +15,15 @@ app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
-  console.log(`==> PROCESANDO: ${rawPhone}`);
+  res.set("Content-Type", "text/xml");
+  res.send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
 
   try {
-    // 1. Identificación de Usuario (Sin apodos)
     let nombre = "";
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
     const { data: user } = await supabase.from('usuarios').select('nombre').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
     nombre = user?.nombre || "";
 
-    // 2. Procesar Texto o Audio
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
       const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -38,38 +37,37 @@ app.post("/whatsapp", async (req, res) => {
       mensajeUsuario = whisper.data.text || "";
     }
 
-    // 3. IA Mentor (Perfil de Autoridad)
+    // NUEVO PROMPT PARA NATURALIDAD TOTAL
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. Autoridad en Psicología y eje intestino-corazón-cerebro. 
-          PROHIBIDO usar "corazón", "amor" o "cariño". Saluda a ${nombre} con respeto.
-          Explica la conexión síntoma-emoción en 3 frases. 
-          Incluye al final la etiqueta [EMOCION] para mi control.` 
+          content: `Eres Anesi, Mentor de los 3 Cerebros. 
+          ESTILO DE CONVERSACIÓN:
+          - Habla de forma NATURAL y FLUIDA, como en una charla de terapia real.
+          - ESTÁ PROHIBIDO empezar siempre con "Saludos" o "Hola". 
+          - Varía tus inicios aleatoriamente según el contexto: "Mira ${nombre}...", "Entiendo lo que dices...", "Esto que mencionas es clave...", "Fíjate en esto...", "Ok, vamos a analizarlo...", o entra directo al tema.
+          - Mantén tu autoridad profesional en el eje intestino-corazón-cerebro pero con calidez humana.
+          - No uses palabras como "corazón" o "cariño".
+          - Máximo 3-4 frases y borra siempre las etiquetas de emoción al final.` 
         },
         { role: "user", content: mensajeUsuario }
       ]
     });
 
-    const respuestaRaw = completion.choices[0].message.content || "";
-    // Limpiamos la etiqueta para que el usuario no la vea
-    const respuestaFinal = respuestaRaw.replace(/\[.*?\]/g, "").trim();
+    let respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
 
-    // 4. Respuesta TwiML Pura (Formato que Twilio ama)
-    res.set("Content-Type", "text/xml");
-    const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${respuestaFinal}</Body></Message></Response>`;
-    
-    console.log("==> RESPUESTA DESPACHADA");
-    return res.status(200).send(xml);
+    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    await twilioClient.messages.create({
+      from: 'whatsapp:+14155238886', 
+      to: `whatsapp:${rawPhone}`,
+      body: respuestaFinal
+    });
 
   } catch (error: any) {
     console.error("==> ERROR:", error.message);
-    res.set("Content-Type", "text/xml");
-    return res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>Anesi está procesando tu energía, por favor intenta en un momento.</Body></Message></Response>`);
   }
 });
 
-app.get("/", (req, res) => res.send("ANESI SISTEMA ACTIVO"));
 app.listen(process.env.PORT || 3000);
