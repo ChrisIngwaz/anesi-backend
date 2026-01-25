@@ -15,8 +15,8 @@ app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
-  res.set("Content-Type", "text/xml");
-  res.send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+  // 1. RESPUESTA INMEDIATA (Para que Twilio no marque error de HTTP)
+  res.status(200).send("OK");
 
   try {
     let nombre = "";
@@ -24,6 +24,7 @@ app.post("/whatsapp", async (req, res) => {
     const { data: user } = await supabase.from('usuarios').select('nombre').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
     nombre = user?.nombre || "";
 
+    // 2. PROCESAMIENTO DE TEXTO O VOZ
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
       const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -37,27 +38,28 @@ app.post("/whatsapp", async (req, res) => {
       mensajeUsuario = whisper.data.text || "";
     }
 
-    // NUEVO PROMPT PARA NATURALIDAD TOTAL
+    // 3. IA MENTOR: FLUIDEZ Y NATURALIDAD
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { 
           role: "system", 
-          content: `Eres Anesi, Mentor de los 3 Cerebros. 
-          ESTILO DE CONVERSACIÓN:
-          - Habla de forma NATURAL y FLUIDA, como en una charla de terapia real.
-          - ESTÁ PROHIBIDO empezar siempre con "Saludos" o "Hola". 
-          - Varía tus inicios aleatoriamente según el contexto: "Mira ${nombre}...", "Entiendo lo que dices...", "Esto que mencionas es clave...", "Fíjate en esto...", "Ok, vamos a analizarlo...", o entra directo al tema.
-          - Mantén tu autoridad profesional en el eje intestino-corazón-cerebro pero con calidez humana.
-          - No uses palabras como "corazón" o "cariño".
-          - Máximo 3-4 frases y borra siempre las etiquetas de emoción al final.` 
+          content: `Eres Anesi, un Mentor humano y sabio. 
+          REGLAS DE ORO:
+          - NUNCA empieces con "Saludos" o "Hola". Sé natural.
+          - Usa inicios variados: "Fíjate ${nombre}...", "Entiendo lo que sientes...", "Es interesante que menciones eso...", "Mira...", o ve directo al grano.
+          - Explica la conexión entre el síntoma físico (intestino) y la emoción (cerebro/corazón) con autoridad pero sencillez.
+          - No uses términos afectuosos como "corazón" o "amor".
+          - Máximo 3 frases cortas. Borra etiquetas como [ANSIEDAD] antes de responder.` 
         },
         { role: "user", content: mensajeUsuario }
-      ]
+      ],
+      temperature: 0.8
     });
 
-    let respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
+    const respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
 
+    // 4. ENVÍO "PUSH" (Requiere la librería twilio instalada en Render)
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await twilioClient.messages.create({
       from: 'whatsapp:+14155238886', 
@@ -65,8 +67,10 @@ app.post("/whatsapp", async (req, res) => {
       body: respuestaFinal
     });
 
+    console.log(`==> RESPUESTA NATURAL ENVIADA A: ${nombre}`);
+
   } catch (error: any) {
-    console.error("==> ERROR:", error.message);
+    console.error("==> FALLO EN FLUJO:", error.message);
   }
 });
 
