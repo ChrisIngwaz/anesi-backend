@@ -15,6 +15,7 @@ app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
+  // Respuesta inmediata a Twilio para evitar reintentos
   res.status(200).send("OK");
 
   try {
@@ -22,32 +23,44 @@ app.post("/whatsapp", async (req, res) => {
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
     const { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
 
-    // 2. PROCESAR MENSAJE (TEXTO O VOZ)
+    // 2. PROCESAR MENSAJE (TEXTO O VOZ CON OPTIMIZACIÓN)
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
-      const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-      const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` } });
-      const form = new FormData();
-      form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
-      form.append('model', 'whisper-1');
-      const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-        headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
-      });
-      mensajeUsuario = whisper.data.text || "";
+      console.log("==> Iniciando procesamiento de audio...");
+      try {
+        const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+        const audioRes = await axios.get(MediaUrl0, { 
+          responseType: 'arraybuffer', 
+          headers: { 'Authorization': `Basic ${auth}` },
+          timeout: 12000 // 12 segundos máximo para descargar
+        });
+
+        const form = new FormData();
+        form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
+        form.append('model', 'whisper-1');
+
+        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
+          headers: { 
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 
+            ...form.getHeaders() 
+          }
+        });
+        mensajeUsuario = whisper.data.text || "";
+        console.log("==> Transcripción exitosa:", mensajeUsuario);
+      } catch (audioErr: any) {
+        console.error("==> Error en Audio/Whisper:", audioErr.message);
+        mensajeUsuario = "(El audio no pudo ser procesado, por favor responde en texto)";
+      }
     }
 
     let respuestaFinal = "";
 
     // 3. LÓGICA DE ONBOARDING (Si faltan datos clave)
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
-      
       if (!user) {
-        // Primerísimo contacto: Pedir datos
         respuestaFinal = "Me hace muy feliz que estés aquí. Fíjate que para poder acompañarte de forma personalizada y entender mejor tu entorno, me encantaría conocerte un poquito más. ¿Podrías decirme tu nombre, cuántos años tienes y desde qué ciudad y país me escribes? Saber esto me ayuda a que mi guía sea mucho más precisa para ti.";
-        // Crear registro inicial vacío para marcar que ya empezamos el onboarding
         await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
       } else {
-        // El usuario está respondiendo sus datos: Usar IA para extraerlos
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
@@ -59,7 +72,6 @@ app.post("/whatsapp", async (req, res) => {
         
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         
-        // Actualizar Supabase con lo que encontramos
         await supabase.from('usuarios').update({
           nombre: info.nombre,
           edad: info.edad,
@@ -68,32 +80,38 @@ app.post("/whatsapp", async (req, res) => {
           fase: 'beta'
         }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        respuestaFinal = `¡Gracias por compartir esto conmigo, ${info.nombre || 'amigo/a'}! Ahora que estamos conectados, cuéntame: ¿Qué es lo que más te ha estado robando la paz en estos días? Te escucho.`;
+        respuestaFinal = `Gracias por tu confianza, ${info.nombre || 'amigo/a'}. He guardado este momento en mi memoria. Siento que estamos aquí por una razón. Cuéntame con toda libertad: ¿Qué es lo que más te ha estado robando la paz en estos días? Te escucho.`;
       }
-} else {
+    } else {
       // 4. MODO MENTOR: NATURALIDAD Y RITMO HUMANO
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           { 
             role: "system", 
-            content: `Eres Anesi, un Mentor humano enfocado en el equilibrio de los 3 Cerebros intestino, corazón y neocortex. Además eres experto en psicología, neurociencia, crecimiento personal, espiritualidad, holistica, terapia de reprocesamiento generativo de la mente, conoces a fondo sobre PNL, endocrinologia, fisiología humana, fisioterapia, entrenador de Crossfit, biología del cuerpo humano.. Usuario: ${user.nombre}, ${user.edad} años.
+            content: `Eres Anesi, un Mentor humano enfocado en el equilibrio de los 3 Cerebros (entérico, corazón y neocórtex). Eres experto en psicología, neurociencia, PNL, espiritualidad, terapia de reprocesamiento generativo, endocrinología y fisiología. 
+            Usuario: ${user.nombre}, ${user.edad} años, desde ${user.ciudad}.
             
             TU FILOSOFÍA: Priorizas la conexión humana sobre la solución rápida. No tienes prisa por vender un plan.
             
             PROTOCOLO DE CONVERSACIÓN:
             1. FLUYE: Si el usuario te cuenta algo, profundiza. Haz una pregunta de seguimiento que demuestre interés genuino.
-            2. EXPLORA: Identifica cuál de los 3 cerebros está hablando, pero no lo digas como un diagnóstico médico, sino como una observación natural.
-            3. EL MOMENTO: Solo si sientes que el usuario está estancado en un problema o si explícitamente pide ayuda, propón una ruta de mentoría paso a paso.
-            4. NATURALEZA: Que se sienta como charlar con alguien que te conoce de años mientras toman un café. 
+            2. EXPLORA: Identifica cuál de los 3 cerebros está hablando, pero menciónalo de forma natural en la charla.
+            3. EL MOMENTO: Solo si sientes que el usuario está estancado o pide ayuda directa, propón una ruta de mentoría paso a paso.
+            4. NATURALEZA: Charla como alguien que conoce al usuario de años. 
             
-            ESTILO: Breve (3-5 frases), cálido, cero etiquetas robóticas, sin saludos repetitivos.` 
+            ESTILO: Breve (3-5 frases), cálido, sin etiquetas robóticas, sin saludos repetitivos.` 
           },
           { role: "user", content: mensajeUsuario }
         ],
         max_tokens: 500
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
+    }
+
+    // SEGURIDAD: Evitar error de 1600 caracteres de WhatsApp
+    if (respuestaFinal.length > 1550) {
+      respuestaFinal = respuestaFinal.substring(0, 1500) + "... (continúa)";
     }
 
     // 5. ENVÍO POR TWILIO
@@ -105,8 +123,10 @@ app.post("/whatsapp", async (req, res) => {
     });
 
   } catch (error: any) {
-    console.error("==> ERROR:", error.message);
+    console.error("==> ERROR GENERAL:", error.message);
   }
 });
 
-app.listen(process.env.PORT || 3000);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Servidor de Anesi corriendo en el puerto 3000");
+});
