@@ -15,16 +15,14 @@ app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
-  // 1. RESPUESTA INMEDIATA (Para que Twilio no marque error de HTTP)
   res.status(200).send("OK");
 
   try {
-    let nombre = "";
+    // 1. BUSCAR USUARIO
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
-    const { data: user } = await supabase.from('usuarios').select('nombre').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
-    nombre = user?.nombre || "";
+    const { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
 
-    // 2. PROCESAMIENTO DE TEXTO O VOZ
+    // 2. PROCESAR MENSAJE (TEXTO O VOZ)
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
       const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -38,28 +36,57 @@ app.post("/whatsapp", async (req, res) => {
       mensajeUsuario = whisper.data.text || "";
     }
 
-    // 3. IA MENTOR: FLUIDEZ Y NATURALIDAD
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { 
-          role: "system", 
-          content: `Eres Anesi, un Mentor humano y sabio. 
-          REGLAS DE ORO:
-          - NUNCA empieces con "Saludos" o "Hola". Sé natural.
-          - Usa inicios variados: "Fíjate ${nombre}...", "Entiendo lo que sientes...", "Es interesante que menciones eso...", "Mira...", o ve directo al grano.
-          - Explica la conexión entre el síntoma físico (intestino) y la emoción (cerebro/corazón) con autoridad pero sencillez.
-          - No uses términos afectuosos como "corazón" o "amor".
-          - Máximo 3 frases cortas. Borra etiquetas como [ANSIEDAD] antes de responder.` 
-        },
-        { role: "user", content: mensajeUsuario }
-      ],
-      temperature: 0.8
-    });
+    let respuestaFinal = "";
 
-    const respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
+    // 3. LÓGICA DE ONBOARDING (Si faltan datos clave)
+    if (!user || !user.nombre || !user.pais || !user.ciudad) {
+      
+      if (!user) {
+        // Primerísimo contacto: Pedir datos
+        respuestaFinal = "Me hace muy feliz que estés aquí. Fíjate que para poder acompañarte de forma personalizada y entender mejor tu entorno, me encantaría conocerte un poquito más. ¿Podrías decirme tu nombre, cuántos años tienes y desde qué ciudad y país me escribes? Saber esto me ayuda a que mi guía sea mucho más precisa para ti.";
+        // Crear registro inicial vacío para marcar que ya empezamos el onboarding
+        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
+      } else {
+        // El usuario está respondiendo sus datos: Usar IA para extraerlos
+        const extract = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "Extrae: nombre, edad (numero), pais, ciudad del texto. Responde SOLO un JSON plano. Si falta algo, pon null." },
+            { role: "user", content: mensajeUsuario }
+          ],
+          response_format: { type: "json_object" }
+        });
+        
+        const info = JSON.parse(extract.choices[0].message.content || "{}");
+        
+        // Actualizar Supabase con lo que encontramos
+        await supabase.from('usuarios').update({
+          nombre: info.nombre,
+          edad: info.edad,
+          pais: info.pais,
+          ciudad: info.ciudad,
+          fase: 'beta'
+        }).ilike('telefono', `%${ultimosDigitos}%`);
 
-    // 4. ENVÍO "PUSH" (Requiere la librería twilio instalada en Render)
+        respuestaFinal = `¡Gracias por compartir esto conmigo, ${info.nombre || 'amigo/a'}! Ahora que estamos conectados, cuéntame: ¿Qué es lo que más te ha estado robando la paz en estos días? Te escucho.`;
+      }
+    } else {
+      // 4. MODO MENTOR NORMAL (Usuario ya registrado)
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { 
+            role: "system", 
+            content: `Eres Anesi, Mentor humano y sabio, experto en de los 3 Cerebros intestino, corazón y neocortex. Además eres experto en psicología, neurociencia, crecimiento personal, espiritualidad, holistica, terapia de reprocesamiento generativo de la mente, conoces a fondo sobre PNL, endocrinologia, fisiología humana, fisioterapia, entrenador de Crossfit, biología del cuerpo humano. Usuario: ${user.nombre}, ${user.edad} años, desde ${user.ciudad}, ${user.pais}. 
+            REGLAS: Natural, cálido, sin saludos repetitivos. No uses "corazón/cariño". Explica la conexión biológica en 3 frases max.` 
+          },
+          { role: "user", content: mensajeUsuario }
+        ]
+      });
+      respuestaFinal = (completion.choices[0].message.content || "").replace(/\[.*?\]/g, "").trim();
+    }
+
+    // 5. ENVÍO POR TWILIO
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await twilioClient.messages.create({
       from: 'whatsapp:+14155238886', 
@@ -67,10 +94,8 @@ app.post("/whatsapp", async (req, res) => {
       body: respuestaFinal
     });
 
-    console.log(`==> RESPUESTA NATURAL ENVIADA A: ${nombre}`);
-
   } catch (error: any) {
-    console.error("==> FALLO EN FLUJO:", error.message);
+    console.error("==> ERROR:", error.message);
   }
 });
 
