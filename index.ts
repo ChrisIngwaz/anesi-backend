@@ -23,7 +23,7 @@ app.post("/webhook", async (req, res) => {
       const ultimosDigitos = userPhone.replace(/\D/g, "").slice(-9);
 
       if (eventName === 'subscription_created') {
-        // Usuario inicia sus 3 días de prueba
+        // Usuario inicia sus 3 días de prueba en Lemon Squeezy
         await supabase.from('usuarios')
           .update({ fase: 'trialing' })
           .ilike('telefono', `%${ultimosDigitos}%`);
@@ -43,7 +43,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ==========================================
-// TU CÓDIGO ORIGINAL (SIN CAMBIOS)
+// TU CÓDIGO ORIGINAL (CON ADICIÓN DE COBRO)
 // ==========================================
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
@@ -55,6 +55,28 @@ app.post("/whatsapp", async (req, res) => {
     // 1. BUSCAR USUARIO
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
     const { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
+
+    // --- NUEVA LÓGICA DE CONTROL DE 3 DÍAS ---
+    if (user && user.fase === 'beta') {
+      const fechaRegistro = new Date(user.created_at);
+      const ahora = new Date();
+      const diasTranscurridos = (ahora.getTime() - fechaRegistro.getTime()) / (1000 * 3600 * 24);
+
+      if (diasTranscurridos > 3) {
+        // REEMPLAZA 'TU_LINK_AQUÍ' con tu URL de Lemon Squeezy
+        const linkPago = `https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31?checkout[custom][phone]=${rawPhone}`;
+        const mensajeCobro = `Ha sido un honor acompañarte estos 3 días, ${user.nombre}. Tu periodo de prueba ha finalizado. Para continuar con nuestra mentoría de élite y seguir desbloqueando el potencial de tus 3 cerebros, activa tu suscripción aquí: ${linkPago}`;
+        
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({
+          from: 'whatsapp:+14155238886', 
+          to: `whatsapp:${rawPhone}`,
+          body: mensajeCobro
+        });
+        return; // Detiene la ejecución para que no responda el mentor
+      }
+    }
+    // --- FIN LÓGICA DE COBRO ---
 
     // 2. PROCESAR MENSAJE (TEXTO O VOZ)
     let mensajeUsuario = Body || "";
