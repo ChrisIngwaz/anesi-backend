@@ -11,6 +11,40 @@ app.use(express.urlencoded({ extended: true }));
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ==========================================
+// NUEVO: BLOQUE LEMON SQUEEZY & SUPABASE
+// ==========================================
+app.post("/webhook", async (req, res) => {
+  try {
+    const eventName = req.body.meta.event_name;
+    const userPhone = req.body.data.attributes.custom_data?.phone;
+
+    if (userPhone) {
+      const ultimosDigitos = userPhone.replace(/\D/g, "").slice(-9);
+
+      if (eventName === 'subscription_created') {
+        // Usuario inicia sus 3 días de prueba
+        await supabase.from('usuarios')
+          .update({ fase: 'trialing' })
+          .ilike('telefono', `%${ultimosDigitos}%`);
+      }
+
+      if (eventName === 'subscription_payment_success') {
+        // Usuario paga exitosamente los $9
+        await supabase.from('usuarios')
+          .update({ fase: 'pro' })
+          .ilike('telefono', `%${ultimosDigitos}%`);
+      }
+    }
+    res.status(200).send("OK");
+  } catch (err) {
+    res.status(500).send("Error");
+  }
+});
+
+// ==========================================
+// TU CÓDIGO ORIGINAL (SIN CAMBIOS)
+// ==========================================
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
