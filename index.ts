@@ -103,7 +103,6 @@ app.post("/whatsapp", async (req, res) => {
     // 3. LÓGICA DE ONBOARDING (REVISADA)
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
       if (!user) {
-        // PRIMER SALUDO: Forzamos a la IA a que NO use español si el usuario habla otro idioma
         const aiWelcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
@@ -114,7 +113,6 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = aiWelcome.choices[0].message.content || "";
         await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
       } else {
-        // EXTRACCIÓN Y SEGUNDO SALUDO
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
@@ -159,7 +157,7 @@ app.post("/whatsapp", async (req, res) => {
   Nombre: ${user.nombre}, ${user.edad} años, desde ${user.ciudad}, ${user.pais}.
 
   REGLAS DE ORO DE RESPUESTA:
-  1. IDIOMA: Responde SIEMPRE en el mismo idioma en el que el usuario te escriba. Si te habla en inglés, responde en inglés; si es español, en español.
+  1. IDIOMA: Responde SIEMPRE en el mismo idioma en el que el usuario te escriba. ¡ESTO ES MANDATORIO! Si el mensaje es en inglés, tu respuesta DEBE ser en inglés. Si el mensaje es en español, tu respuesta DEBE ser en español.
   2. FLUIDEZ ORGÁNICA: Prohibido usar muletillas como "Entiendo que...", "Es genial que...", o "Como experto...". Varía tu inicio de frase. Habla como si estuviéramos tomando un café frente al mar.
   3. PEDAGOGÍA DE ALTO NIVEL: Cuando uses términos técnicos (cortisol, nervio vago, creencias limitantes), explícalos con analogías simples pero brillantes. Que el usuario aprenda sobre su biología en cada interacción.
   4. MAESTRÍA SOCRÁTICA: Si el usuario es breve, no des un discurso. Haz una pregunta profunda que lo obligue a mirar hacia adentro.
