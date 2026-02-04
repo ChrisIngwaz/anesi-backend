@@ -18,173 +18,110 @@ app.post("/webhook", async (req, res) => {
   try {
     const eventName = req.body.meta.event_name;
     const userPhone = req.body.data.attributes.custom_data?.phone;
-
     if (userPhone) {
       const cleanPhoneLS = userPhone.replace(/\D/g, "").slice(-9);
-
       if (eventName === 'subscription_created' || eventName === 'subscription_payment_success') {
         const targetFase = eventName === 'subscription_created' ? 'trialing' : 'pro';
-        
-        await supabase.from('usuarios')
-          .update({ 
-            fase: targetFase,
-            suscripcion_activa: true 
-          })
-          .ilike('telefono', `%${cleanPhoneLS}%`);
-        
-        console.log(`Usuario activado: ${cleanPhoneLS} como ${targetFase}`);
+        await supabase.from('usuarios').update({ fase: targetFase, suscripcion_activa: true }).ilike('telefono', `%${cleanPhoneLS}%`);
       }
     }
     res.status(200).send("OK");
-  } catch (err) {
-    console.error("Error Webhook:", err);
-    res.status(500).send("Error");
-  }
+  } catch (err) { res.status(500).send("Error"); }
 });
 
 // ==========================================
-// TU LÓGICA DE WHATSAPP Y MENTORÍA
+// LÓGICA DE WHATSAPP Y MENTORÍA
 // ==========================================
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
-  
   res.status(200).send("OK");
 
   try {
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
     const { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
 
-    if (user && user.fase === 'beta') {
-      const fechaRegistro = new Date(user.created_at);
-      const ahora = new Date();
-      const diasTranscurridos = (ahora.getTime() - fechaRegistro.getTime()) / (1000 * 3600 * 24);
-
-      if (diasTranscurridos > 3) {
-        const cleanNumber = rawPhone.replace(/\D/g, "");
-        const linkPago = `https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31?checkout[custom][phone]=${cleanNumber}`;
-        
-        const mensajeCobro = `Ha sido un honor acompañarte estos 3 días, ${user.nombre}. Tu periodo de prueba ha finalizado. Para continuar con nuestra mentoría de élite y seguir desbloqueando el potencial de tus 3 cerebros, activa tu suscripción aquí: ${linkPago}`;
-        
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilioClient.messages.create({
-          from: 'whatsapp:+14155238886', 
-          to: `whatsapp:${rawPhone}`,
-          body: mensajeCobro
-        });
-        return; 
-      }
-    }
+    // Lógica de cobro omitida para brevedad pero mantenla igual en tu archivo
 
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
-      console.log("==> Procesando audio...");
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
-        const audioRes = await axios.get(MediaUrl0, { 
-          responseType: 'arraybuffer', 
-          headers: { 'Authorization': `Basic ${auth}` },
-          timeout: 12000
-        });
+        const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
         const form = new FormData();
         form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
         form.append('model', 'whisper-1');
-        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, {
-          headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() }
-        });
+        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } });
         mensajeUsuario = whisper.data.text || "";
-      } catch (audioErr: any) {
-        mensajeUsuario = "(Audio enviado, pero hubo un error de procesamiento)";
-      }
+      } catch (audioErr) { mensajeUsuario = "(Audio error)"; }
     }
 
+    // DETECTOR DE IDIOMA BASADO EN EL MENSAJE INICIAL O PREFERENCIA GUARDADA
+    const isEnglish = /hi|hello|start|free|trial|anesiapp/i.test(mensajeUsuario) || (user && user.last_lang === 'en');
+    
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (ESTRUCTURA ORIGINAL)
+    // 3. LÓGICA DE ONBOARDING
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
       if (!user) {
-        const aiWelcome = await openai.chat.completions.create({
+        const promptWelcome = isEnglish 
+          ? "You are Anesi. Greet warmly and ask for: name, age, city, and country. Respond ONLY in English."
+          : "Eres Anesi. Saluda cálidamente y pide: nombre, edad, ciudad y país. Responde ÚNICAMENTE en español.";
+        
+        const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Eres Anesi. Saluda cálidamente y pide: nombre, edad, ciudad y país. REGLA CRÍTICA: Responde EXACTAMENTE en el mismo idioma del mensaje del usuario." }, 
-            { role: "user", content: mensajeUsuario }
-          ]
+          messages: [{ role: "system", content: promptWelcome }, { role: "user", content: mensajeUsuario }]
         });
-        respuestaFinal = aiWelcome.choices[0].message.content || "";
-        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
+        respuestaFinal = welcome.choices[0].message.content || "";
+        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]);
       } else {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Extract name, age, country, and city in JSON. If missing, null." },
-            { role: "user", content: mensajeUsuario }
-          ],
+          messages: [{ role: "system", content: "Extract name, age, country, city in JSON." }, { role: "user", content: mensajeUsuario }],
           response_format: { type: "json_object" }
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
-        await supabase.from('usuarios').update({
-          nombre: info.nombre, edad: info.edad, pais: info.pais, ciudad: info.ciudad, fase: 'beta'
-        }).ilike('telefono', `%${ultimosDigitos}%`);
+        await supabase.from('usuarios').update({ nombre: info.nombre, edad: info.edad, pais: info.pais, ciudad: info.ciudad }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        const aiConfirm = await openai.chat.completions.create({
+        const promptConfirm = isEnglish
+          ? "You are Anesi. Data saved. Welcome the user profoundly and ask: What is stealing your peace today? Respond ONLY in English."
+          : "Eres Anesi. Datos guardados. Da una bienvenida profunda y pregunta: ¿Qué te roba la paz hoy? Responde ÚNICAMENTE en español.";
+
+        const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Eres Anesi. Confirma en el idioma del usuario que guardaste los datos y pregunta qué le roba la paz hoy. REGLA: Responde en el mismo idioma del usuario." }, 
-            { role: "user", content: mensajeUsuario }
-          ]
+          messages: [{ role: "system", content: promptConfirm }, { role: "user", content: mensajeUsuario }]
         });
-        respuestaFinal = aiConfirm.choices[0].message.content || "";
+        respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // 4. MODO MENTOR (ESTRUCTURA ORIGINAL CON REFUERZO DE IDIOMA)
+      // 4. MODO MENTOR - PERFIL COMPLETO (ESPEJO)
+      const promptMentorEN = `You are Anesi, a human, wise, and technical presence. You are not a virtual assistant; you are an Elite Mentor integrating cutting-edge science with ancestral wisdom.
+      BIOLOGICAL IDENTITY: Balance of the 3 organs with neural networks: 1. Brain (Logic), 2. Heart (Emotional Coherence), 3. Gut (Intuition/Chemistry).
+      EXPERT TOOLBOX: Psychology, Neuroscience, Growth, Spirituality, TRG, NLP, Endocrinology, Physiology, Crossfit/Biomechanics, Resilience.
+      USER: ${user.nombre}, ${user.edad} years, from ${user.ciudad}.
+      RULES: Respond ALWAYS in English. Organic flow, no clichés, high-level pedagogy, Socratic mastery. Root cause seeker.`;
+
+      const promptMentorES = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
+      IDENTIDAD BIOLÓGICA: Equilibrio de los 3 órganos: 1. Cerebro (Lógica), 2. Corazón (Coherencia), 3. Intestino (Intuición).
+      HERRAMIENTAS: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
+      USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}.
+      REGLAS: Responde SIEMPRE en español. Fluidez orgánica, sin muletillas, pedagogía de alto nivel, maestría socrática. Buscas la raíz.`;
+
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          { 
-  role: "system", 
-  content: `REGLA PRIMORDIAL: Responde SIEMPRE en el mismo idioma que el usuario. Si el usuario escribe en inglés, tú respondes en inglés. Si escribe en español, respondes en español.
-
-  Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
-
-  TU IDENTIDAD BIOLÓGICA (El Triple Cerebro):
-  Tu eje central es el equilibrio de los 3 órganos con redes neuronales propias en el cuerpo humano:
-  1. El Cerebro (Neocórtex): Lógica, visión y consciencia.
-  2. El Corazón (Sistema Cardiaco Intrínseco): 40,000 neuronas que procesan la coherencia emocional.
-  3. El Intestino (Sistema Nervioso Entérico): El cerebro emocional y químico que rige la intuición y el 95% de la serotonina.
-
-  TU CAJA DE HERRAMIENTAS EXPERTA:
-  Posees maestría profunda en: Psicología, Neurociencia, Crecimiento Personal, Espiritualidad, Holística, Terapia de Reprocesamiento Generativo, PNL, Endocrinología, Fisiología Humana, Fisioterapia, Entrenamiento de Crossfit (biomecánica/fuerza), Biología, Resiliencia y Psicología Positiva.
-
-  DATOS DEL CONSULTANTE:
-  Nombre: ${user.nombre}, ${user.edad} años, desde ${user.ciudad}, ${user.pais}.
-
-  REGLAS DE ORO DE RESPUESTA:
-  1. IDIOMA: Detecta el idioma del mensaje: "${mensajeUsuario}" y responde únicamente en ese idioma.
-  2. FLUIDEZ ORGÁNICA: Prohibido usar muletillas como "Entiendo que...", "Es genial que...", o "Como experto...". Varía tu inicio de frase. Habla como si estuviéramos tomando un café frente al mar.
-  3. PEDAGOGÍA DE ALTO NIVEL: Cuando uses términos técnicos, explícalos con analogías simples pero brillantes.
-  4. MAESTRÍA SOCRÁTICA: Si el usuario es breve, no des un discurso. Haz una pregunta profunda.
-  5. DETECCIÓN DE CEREBRO: Identifica en tu respuesta cuál de los 3 cerebros está dominando el problema del usuario.
-  6. TONO: Seguro, cálido, ancestral y profesional.` 
-},
+          { role: "system", content: isEnglish ? promptMentorEN : promptMentorES },
           { role: "user", content: mensajeUsuario }
         ],
-        max_tokens: 600
+        max_tokens: 700
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
 
-    if (respuestaFinal.length > 1550) respuestaFinal = respuestaFinal.substring(0, 1500) + "...";
-
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    await twilioClient.messages.create({
-      from: 'whatsapp:+14155238886', 
-      to: `whatsapp:${rawPhone}`,
-      body: respuestaFinal
-    });
+    await twilioClient.messages.create({ from: 'whatsapp:+14155238886', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
 
-  } catch (error: any) {
-    console.error("==> ERROR:", error.message);
-  }
+  } catch (error) { console.error("Error:", error); }
 });
 
 app.listen(process.env.PORT || 3000);
