@@ -100,21 +100,25 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (MODIFICADA SOLO PARA EL IDIOMA)
+    // 3. LÓGICA DE ONBOARDING (REVISADA)
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
       if (!user) {
-        // CAMBIO: IA responde en el idioma del mensaje pidiendo los datos
+        // PRIMER SALUDO: Forzamos a la IA a que NO use español si el usuario habla otro idioma
         const aiWelcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Saluda cálidamente y pide: nombre, edad, ciudad y país. Responde siempre en el mismo idioma del usuario." }, { role: "user", content: mensajeUsuario }]
+          messages: [
+            { role: "system", content: "Eres Anesi. Saluda cálidamente y pide: nombre, edad, ciudad y país. REGLA CRÍTICA: Responde EXACTAMENTE en el mismo idioma del mensaje del usuario. Si dice 'Hi', responde en inglés. Si dice 'Hola', en español." }, 
+            { role: "user", content: mensajeUsuario }
+          ]
         });
         respuestaFinal = aiWelcome.choices[0].message.content || "";
         await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
       } else {
+        // EXTRACCIÓN Y SEGUNDO SALUDO
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extrae: nombre, edad (numero), pais, ciudad del texto. Responde SOLO un JSON plano. Si falta algo, pon null." },
+            { role: "system", content: "Extract name, age, country, and city in JSON. If missing, null." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
@@ -124,13 +128,16 @@ app.post("/whatsapp", async (req, res) => {
           nombre: info.nombre, edad: info.edad, pais: info.pais, ciudad: info.ciudad, fase: 'beta'
         }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        // CAMBIO: IA responde la confirmación en el idioma del usuario
         const aiConfirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Confirma que guardaste los datos, da una bienvenida profunda y pregunta qué le roba la paz hoy. Responde siempre en el mismo idioma del usuario." }, { role: "user", content: mensajeUsuario }]
+          messages: [
+            { role: "system", content: "Eres Anesi. El usuario dio sus datos. Confirma en su idioma, da una bienvenida profunda y pregunta qué le roba la paz hoy. REGLA: Usa el mismo idioma del usuario." }, 
+            { role: "user", content: mensajeUsuario }
+          ]
         });
         respuestaFinal = aiConfirm.choices[0].message.content || "";
       }
+    }
     } else {
       // 4. MODO MENTOR (TU LÓGICA INTACTA)
       const completion = await openai.chat.completions.create({
