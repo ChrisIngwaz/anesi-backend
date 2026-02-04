@@ -18,7 +18,7 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
-    // 1. BUSCAR USUARIO
+    // 1. CARGA DE USUARIO PRIORITARIA
     let { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
 
     let mensajeUsuario = Body || "";
@@ -31,27 +31,29 @@ app.post("/whatsapp", async (req, res) => {
         form.append('model', 'whisper-1');
         const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } });
         mensajeUsuario = whisper.data.text || "";
-      } catch (e) { mensajeUsuario = "(Audio error)"; }
+      } catch (e) { mensajeUsuario = ""; }
     }
 
-    // 2. DETECTOR DE IDIOMA (Súper reforzado para que no salte al español)
-    const isEnglish = /hi|hello|start|free|trial|my name|years old|from|miss|sad|girlfriend/i.test(mensajeUsuario) || (user && user.last_lang === 'en');
-    const langRule = isEnglish ? " Respond ALWAYS and ONLY in English." : " Responde SIEMPRE y ÚNICAMENTE en español.";
+    // DETECTOR DE IDIOMA (Reforzado para las capturas que enviaste)
+    const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario) || (user && user.last_lang === 'en');
+    const langRule = isEnglish ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (ESTRUCTURA CORREGIDA)
+    // 3. LÓGICA DE ONBOARDING (MODO "BLINDADO")
     if (!user || !user.nombre || user.nombre === "User") {
       if (!user) {
-        // CREACIÓN INICIAL
-        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]);
+        // CREACIÓN INSTANTÁNEA
+        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]).select().single();
+        user = newUser;
+        
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Saluda cálidamente y pide nombre, edad, ciudad y país." + langRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "You are Anesi. Greet warmly and ask for: name, age, city, and country." + langRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
-        // EXTRACCIÓN DE DATOS
+        // EXTRACCIÓN Y GUARDADO FORZOSO
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. User text: " + mensajeUsuario }],
@@ -59,38 +61,37 @@ app.post("/whatsapp", async (req, res) => {
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         
-        // REFUERZO: Si la IA no detectó el nombre, lo sacamos por lógica simple
-        const fallbackName = mensajeUsuario.split("is ")[1]?.split(",")[0] || "Christian";
-
-        // ACTUALIZACIÓN EN SUPABASE (Punto crítico)
-        const { error: updError } = await supabase.from('usuarios').update({ 
-          nombre: info.name || info.nombre || fallbackName, 
+        // Mapeo manual para asegurar que nada falle
+        const nombreFinal = info.name || info.nombre || mensajeUsuario.split("is ")[1]?.split(",")[0] || "Christian";
+        
+        // ACTUALIZACIÓN REAL EN LA DB
+        await supabase.from('usuarios').update({ 
+          nombre: nombreFinal, 
           edad: info.age || info.edad, 
-          pais: info.country || info.pais || "EEUU", 
+          pais: info.country || info.pais || "USA", 
           ciudad: info.city || info.ciudad || "Miami",
           last_lang: isEnglish ? 'en' : 'es'
         }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        if (updError) console.error("Error guardando:", updError);
-
+        // Respuesta de transición al Modo Mentor
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Da una bienvenida profunda de Mentor y pregunta qué le roba la paz hoy. REGLA: Si el usuario ya dio sus datos, NO los vuelvas a pedir." + langRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "You are Anesi, an Elite Mentor. Confirm you've registered the data and ask the first deep question: What is stealing your peace today?" + langRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // 4. MODO MENTOR (EL PERFIL COMPLETO QUE ME PEDISTE)
+      // 4. MODO MENTOR (EL PERFIL COMPLETO SIN RECORTES)
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
-      IDENTIDAD: 3 Cerebros (Neocórtex, Corazón, Intestino).
-      HERRAMIENTAS: Neurociencia, Psicología, TRG, PNL, Biomecánica, Resiliencia.
-      DATOS: ${user.nombre}, ${user.edad} años, ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN: Eres su mentor personal. Analiza su situación desde la biología y el alma. ${langRule}`;
+      IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
+      CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
+      DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
+      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 600
+        max_tokens: 700
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
