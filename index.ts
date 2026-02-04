@@ -137,7 +137,6 @@ app.post("/whatsapp", async (req, res) => {
         });
         respuestaFinal = aiConfirm.choices[0].message.content || "";
       }
-    }
     } else {
       // 4. MODO MENTOR (TU LÓGICA INTACTA)
       const completion = await openai.chat.completions.create({
