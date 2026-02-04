@@ -20,7 +20,6 @@ app.post("/webhook", async (req, res) => {
     const userPhone = req.body.data.attributes.custom_data?.phone;
 
     if (userPhone) {
-      // Extraemos solo los números y tomamos los últimos 9 para búsqueda elástica
       const cleanPhoneLS = userPhone.replace(/\D/g, "").slice(-9);
 
       if (eventName === 'subscription_created' || eventName === 'subscription_payment_success') {
@@ -48,24 +47,20 @@ app.post("/webhook", async (req, res) => {
 // ==========================================
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
-  // rawPhone mantiene el formato original con "+" para la creación de usuario
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
   
   res.status(200).send("OK");
 
   try {
-    // 1. BUSCAR USUARIO (Búsqueda por terminación para evitar errores de formato)
     const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
     const { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
 
-    // --- LÓGICA DE CONTROL DE COBRO (3 DÍAS) ---
     if (user && user.fase === 'beta') {
       const fechaRegistro = new Date(user.created_at);
       const ahora = new Date();
       const diasTranscurridos = (ahora.getTime() - fechaRegistro.getTime()) / (1000 * 3600 * 24);
 
       if (diasTranscurridos > 3) {
-        // Enviamos el número limpio al link para que Lemon Squeezy lo procese sin errores
         const cleanNumber = rawPhone.replace(/\D/g, "");
         const linkPago = `https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31?checkout[custom][phone]=${cleanNumber}`;
         
@@ -81,7 +76,6 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
-    // 2. PROCESAR MENSAJE (TEXTO O VOZ)
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
       console.log("==> Procesando audio...");
@@ -106,11 +100,18 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING
+    // 3. LÓGICA DE ONBOARDING (MODIFICADA PARA IDIOMA AUTOMÁTICO)
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
       if (!user) {
-        respuestaFinal = "Me hace muy feliz que estés aquí. Fíjate que para poder acompañarte de forma personalizada y entender mejor tu entorno, me encantaría conocerte un poquito más. ¿Podrías decirme tu nombre, cuántos años tienes y desde qué ciudad y país me escribes? Saber esto me ayuda a que mi guía sea mucho más precisa para ti.";
-        // Aquí se guarda con el "+" original de Twilio
+        // En lugar de texto fijo, la IA genera el saludo en el idioma detectado
+        const welcome = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "Eres Anesi. Saluda al usuario con calidez en su mismo idioma. Pídele su nombre, edad, ciudad y país para iniciar la mentoría. No uses muletillas." },
+            { role: "user", content: mensajeUsuario }
+          ]
+        });
+        respuestaFinal = welcome.choices[0].message.content || "";
         await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
       } else {
         const extract = await openai.chat.completions.create({
@@ -126,7 +127,15 @@ app.post("/whatsapp", async (req, res) => {
           nombre: info.nombre, edad: info.edad, pais: info.pais, ciudad: info.ciudad, fase: 'beta'
         }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        respuestaFinal = `Gracias por tu confianza, ${info.nombre || 'amigo/a'}. He guardado este momento en mi memoria. Siento que tu corazón está buscando una respuesta hoy. No te daré tareas largas, solo quiero que esta noche, antes de dormir, respires profundo y te digas: 'Estoy a salvo para cambiar'. Mañana daremos el primer paso real. Cuéntame, para tenerlo presente... ¿Qué es lo que más te ha estado robando la paz hoy?`;
+        // En lugar de texto fijo, la IA genera el cierre en el idioma detectado
+        const confirm = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "Eres Anesi. El usuario ha dado sus datos. Agradécele en su idioma, dile que estás listo para empezar y pregúntale qué le roba la paz hoy. Usa un tono profundo y sabio." },
+            { role: "user", content: mensajeUsuario }
+          ]
+        });
+        respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
       // 4. MODO MENTOR (TU LÓGICA INTACTA)
