@@ -25,14 +25,20 @@ app.post("/webhook", async (req, res) => {
       if (eventName === 'subscription_created') {
         // Usuario inicia sus 3 días de prueba en Lemon Squeezy
         await supabase.from('usuarios')
-          .update({ fase: 'trialing' })
+          .update({ 
+            fase: 'trialing',
+            suscripcion_activa: true 
+          })
           .ilike('telefono', `%${ultimosDigitos}%`);
       }
 
       if (eventName === 'subscription_payment_success') {
         // Usuario paga exitosamente los $9
         await supabase.from('usuarios')
-          .update({ fase: 'pro' })
+          .update({ 
+            fase: 'pro',
+            suscripcion_activa: true 
+          })
           .ilike('telefono', `%${ultimosDigitos}%`);
       }
     }
@@ -63,8 +69,9 @@ app.post("/whatsapp", async (req, res) => {
       const diasTranscurridos = (ahora.getTime() - fechaRegistro.getTime()) / (1000 * 3600 * 24);
 
       if (diasTranscurridos > 3) {
-        // REEMPLAZA 'TU_LINK_AQUÍ' con tu URL de Lemon Squeezy
-        const linkPago = `https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31?checkout[custom][phone]=${rawPhone}`;
+        // El link lleva el teléfono limpio para evitar errores de matching
+        const phoneParam = rawPhone.replace(/\D/g, "");
+        const linkPago = `https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31?checkout[custom][phone]=${phoneParam}`;
         const mensajeCobro = `Ha sido un honor acompañarte estos 3 días, ${user.nombre}. Tu periodo de prueba ha finalizado. Para continuar con nuestra mentoría de élite y seguir desbloqueando el potencial de tus 3 cerebros, activa tu suscripción aquí: ${linkPago}`;
         
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
