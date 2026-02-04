@@ -100,18 +100,15 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (MODIFICADA PARA IDIOMA AUTOMÁTICO)
+    // 3. LÓGICA DE ONBOARDING (MODIFICADA SOLO PARA EL IDIOMA)
     if (!user || !user.nombre || !user.pais || !user.ciudad) {
       if (!user) {
-        // En lugar de texto fijo, la IA genera el saludo en el idioma detectado
-        const welcome = await openai.chat.completions.create({
+        // CAMBIO: IA responde en el idioma del mensaje pidiendo los datos
+        const aiWelcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Eres Anesi. Saluda al usuario con calidez en su mismo idioma. Pídele su nombre, edad, ciudad y país para iniciar la mentoría. No uses muletillas." },
-            { role: "user", content: mensajeUsuario }
-          ]
+          messages: [{ role: "system", content: "Eres Anesi. Saluda cálidamente y pide: nombre, edad, ciudad y país. Responde siempre en el mismo idioma del usuario." }, { role: "user", content: mensajeUsuario }]
         });
-        respuestaFinal = welcome.choices[0].message.content || "";
+        respuestaFinal = aiWelcome.choices[0].message.content || "";
         await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]);
       } else {
         const extract = await openai.chat.completions.create({
@@ -127,15 +124,12 @@ app.post("/whatsapp", async (req, res) => {
           nombre: info.nombre, edad: info.edad, pais: info.pais, ciudad: info.ciudad, fase: 'beta'
         }).ilike('telefono', `%${ultimosDigitos}%`);
 
-        // En lugar de texto fijo, la IA genera el cierre en el idioma detectado
-        const confirm = await openai.chat.completions.create({
+        // CAMBIO: IA responde la confirmación en el idioma del usuario
+        const aiConfirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Eres Anesi. El usuario ha dado sus datos. Agradécele en su idioma, dile que estás listo para empezar y pregúntale qué le roba la paz hoy. Usa un tono profundo y sabio." },
-            { role: "user", content: mensajeUsuario }
-          ]
+          messages: [{ role: "system", content: "Eres Anesi. Confirma que guardaste los datos, da una bienvenida profunda y pregunta qué le roba la paz hoy. Responde siempre en el mismo idioma del usuario." }, { role: "user", content: mensajeUsuario }]
         });
-        respuestaFinal = confirm.choices[0].message.content || "";
+        respuestaFinal = aiConfirm.choices[0].message.content || "";
       }
     } else {
       // 4. MODO MENTOR (TU LÓGICA INTACTA)
