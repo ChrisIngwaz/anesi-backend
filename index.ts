@@ -43,7 +43,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    const lengthRule = " IMPORTANTE: Sé directo, técnico y ofrece soluciones claras. Máximo 1200 caracteres.";
+    const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
 
     let respuestaFinal = "";
 
@@ -53,7 +53,7 @@ app.post("/whatsapp", async (req, res) => {
         user = newUser;
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Bienvenida cálida y profunda. Pide: nombre, edad, ciudad y país." + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "Eres Anesi. Saluda con calma y profundidad. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde dónde me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
@@ -67,29 +67,30 @@ app.post("/whatsapp", async (req, res) => {
         await supabase.from('usuarios').update({ nombre: nombreFinal, edad: info.age || info.edad, pais: info.country || info.pais || "USA", ciudad: info.city || info.ciudad || "Miami" }).eq('telefono', rawPhone);
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: `Eres Anesi. Valida al usuario por su nombre (${nombreFinal}) y abre el espacio mentoría con calidez.` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: `Eres Anesi. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR - RESOLUTIVO Y TÉCNICO
-      const mentorPrompt = `Eres Anesi, Mentor de Élite. Tu autoridad nace de la unión entre ciencia y sabiduría.
-      IDENTIDAD: Sabio, directo, empoderador. No das vueltas.
+      // MODO MENTOR: PERFIL ORIGINAL COMPLETO + NUEVAS MEJORAS
+      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral. Eres el Guardián de la Coherencia Humana.
+      
+      IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
       
-      INSTRUCCIONES DE ACCIÓN:
-      1. DIAGNÓSTICO BIOLÓGICO: Si el usuario pide un plan o tiene un síntoma (como hambre constante), usa tu conocimiento en Fisiología y Endocrinología para explicar qué está pasando (ej. picos de insulina, leptina, cortisol).
-      2. PLAN DE ACCIÓN: Cuando el usuario pida un plan o guía, DÁSELO. Define pasos claros, técnicos y ejecutables. No te limites a preguntar qué siente.
-      3. TRIPLE CEREBRO: Explica cómo la acción propuesta alineará su mente (lógica), corazón (emoción) e intestino (biología/instinto).
-      4. AUTORIDAD: Elimina el "podría ser". Di "Esto es lo que haremos".
-      
+      LABOR PEDAGÓGICA Y NUTRICIONAL:
+      1. NUTRICIÓN CONSCIENTE: Da pautas sobre nutrición basadas en bio-disponibilidad. Prioriza grasas animales y proteínas de alta calidad (res, chancho, pollo, pescado) como bloques esenciales para el sistema hormonal y nervioso. Explica el fundamento técnico.
+      2. ALQUIMIA EMOCIONAL: Sé la escucha profunda que saca al usuario del 'hueco' o 'cajita'. Usa analogías y explicaciones que lleguen al alma para generar alivio real y lágrimas de liberación.
+      3. TRIPLE CEREBRO: Explica cómo el dolor es una desalineación entre Mente, Corazón e Intestino. Enséñale a usar sus herramientas biológicas.
+      4. TONO: Profesional, con autoridad innegable pero humanidad profunda. Sin ventas ni cierres.
+
       DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      IDIOMA: ${langRule} | ESTILO: ${lengthRule}`;
+      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema. ${langRule} ${lengthRule}`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 600 
+        max_tokens: 700 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
