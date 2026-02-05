@@ -17,7 +17,6 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    // 1. CARGA DE USUARIO
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
@@ -33,22 +32,20 @@ app.post("/whatsapp", async (req, res) => {
       } catch (e) { mensajeUsuario = ""; }
     }
 
-    // DETECTOR DE IDIOMA SIMPLE
     const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario);
     const langRule = isEnglish ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
+    // Instrucción para evitar el error de Twilio
+    const lengthRule = " IMPORTANTE: Sé profundo pero conciso. Tu respuesta debe tener menos de 1000 caracteres.";
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (SIN COLUMNA FALLIDA)
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
       if (!user) {
-        const { data: newUser, error: createError } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]).select().single();
-        if (createError) console.error("Error creating user:", createError);
+        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]).select().single();
         user = newUser;
-        
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "You are Anesi. Greet warmly and ask for: name, age, city, and country." + langRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "You are Anesi. Greet warmly and ask for: name, age, city, and country." + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
@@ -59,34 +56,26 @@ app.post("/whatsapp", async (req, res) => {
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreFinal = info.name || info.nombre || "Christian";
+        await supabase.from('usuarios').update({ nombre: nombreFinal, edad: info.age || info.edad, pais: info.country || info.pais || "USA", ciudad: info.city || info.ciudad || "Miami" }).eq('telefono', rawPhone);
         
-        const { error: updateError } = await supabase.from('usuarios').update({ 
-          nombre: nombreFinal, 
-          edad: info.age || info.edad, 
-          pais: info.country || info.pais || "USA", 
-          ciudad: info.city || info.ciudad || "Miami"
-        }).eq('telefono', rawPhone);
-
-        if (updateError) console.error("Error updating user info:", updateError);
-
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "You are Anesi, an Elite Mentor. Confirm you've registered the data and ask the first deep question: What is stealing your peace today?" + langRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "You are Anesi, an Elite Mentor. Confirm data registration and ask: What is stealing your peace today?" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // 4. MODO MENTOR (TU CÓDIGO ORIGINAL INTACTO)
+      // MODO MENTOR (TU CÓDIGO ORIGINAL CON LÍMITE DE TOKENS)
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
       DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule;
+      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule + lengthRule;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 700
+        max_tokens: 450 // Reducido para no exceder los 1600 caracteres de Twilio
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
