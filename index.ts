@@ -17,7 +17,7 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    // Buscamos por el número exacto que envía Twilio para no fallar en el UPDATE
+    // 1. CARGA DE USUARIO
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
@@ -33,17 +33,16 @@ app.post("/whatsapp", async (req, res) => {
       } catch (e) { mensajeUsuario = ""; }
     }
 
-    // DETECTOR DE IDIOMA
-    const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario) || (user && user.last_lang === 'en');
+    // DETECTOR DE IDIOMA SIMPLE
+    const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario);
     const langRule = isEnglish ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (REPARADA PARA ASEGURAR REGISTRO)
+    // 3. LÓGICA DE ONBOARDING (SIN COLUMNA FALLIDA)
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
       if (!user) {
-        // CREACIÓN CON NÚMERO COMPLETO
-        const { data: newUser, error: createError } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]).select().single();
+        const { data: newUser, error: createError } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]).select().single();
         if (createError) console.error("Error creating user:", createError);
         user = newUser;
         
@@ -53,23 +52,19 @@ app.post("/whatsapp", async (req, res) => {
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
-        // EXTRACCIÓN
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. User text: " + mensajeUsuario }],
           response_format: { type: "json_object" }
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
-        
         const nombreFinal = info.name || info.nombre || "Christian";
         
-        // ACTUALIZACIÓN USANDO EL TELÉFONO EXACTO (EQ)
         const { error: updateError } = await supabase.from('usuarios').update({ 
           nombre: nombreFinal, 
           edad: info.age || info.edad, 
           pais: info.country || info.pais || "USA", 
-          ciudad: info.city || info.ciudad || "Miami",
-          last_lang: isEnglish ? 'en' : 'es'
+          ciudad: info.city || info.ciudad || "Miami"
         }).eq('telefono', rawPhone);
 
         if (updateError) console.error("Error updating user info:", updateError);
@@ -81,7 +76,7 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // 4. MODO MENTOR (SIN CAMBIOS)
+      // 4. MODO MENTOR (TU CÓDIGO ORIGINAL INTACTO)
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
@@ -97,7 +92,6 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    // Cambiado al número oficial que vinculaste
     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
 
   } catch (error) { console.error("Error general:", error); }
