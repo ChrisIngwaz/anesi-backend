@@ -20,7 +20,7 @@ app.post("/whatsapp", async (req, res) => {
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
-    let detectedLang = "es"; // Por defecto español
+    let detectedLang = "es";
 
     if (MediaUrl0) {
       try {
@@ -35,23 +35,17 @@ app.post("/whatsapp", async (req, res) => {
         });
         
         mensajeUsuario = whisper.data.text || "";
-        // Whisper es excelente detectando el idioma del audio
         if (whisper.data.language === 'en') detectedLang = "en";
       } catch (e) { mensajeUsuario = ""; }
     }
 
-    // Lógica de detección de idioma blindada
-    // Si es texto, usamos una lógica más robusta que solo buscar "hi"
-    const englishPatterns = /\b(hi|hello|how are you|good morning|my name is|i am|english)\b/i;
+    const englishPatterns = /\b(hi|hello|how are you|my name is|i am|english)\b/i;
     if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) {
       detectedLang = "en";
     }
 
-    // REGLA DE ORO: Si ya tenemos un idioma en la base de datos (puedes crear la columna last_lang si quieres persistencia total)
-    // por ahora, usaremos el detector basado en el mensaje actual pero con instrucciones más estrictas.
-    
-    const langRule = detectedLang === "en" ? " Respond ONLY in English. Do not use any Spanish." : " Responde ÚNICAMENTE en español. No uses inglés por ningún motivo.";
-    const lengthRule = " IMPORTANTE: Sé profundo pero conciso. Tu respuesta debe tener menos de 1000 caracteres.";
+    const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
+    const lengthRule = " IMPORTANTE: Sé profundo pero conciso (máximo 1100 caracteres).";
 
     let respuestaFinal = "";
 
@@ -81,18 +75,20 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR
+      // MODO MENTOR CON PERFIL ORIGINAL + LABOR PEDAGÓGICA
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
-      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN DE IDIOMA: ${langRule}
-      INSTRUCCIÓN DE ESTILO: Responde como mentor profundo. Identifica qué cerebro domina el problema. ${lengthRule}`;
+      
+      LABOR PEDAGÓGICA (NUEVO): Explica brevemente al usuario que su cuerpo tiene 3 centros de procesamiento (Cerebro, Corazón, Intestino) interconectados por neuronas. Ayúdale a entender que su dolor o angustia física es una señal de estos centros buscando alineación. Haz que comprenda que la sanación real requiere el uso de estas herramientas biológicas.
+      
+      DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
+      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule + lengthRule;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 450 
+        max_tokens: 550 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
