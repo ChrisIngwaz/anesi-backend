@@ -45,7 +45,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    const lengthRule = " IMPORTANTE: Sé profundo pero conciso (máximo 1100 caracteres).";
+    const lengthRule = " IMPORTANTE: Sé profundo pero no cierres la conversación. Máximo 1100 caracteres.";
 
     let respuestaFinal = "";
 
@@ -75,15 +75,20 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR CON PERFIL ORIGINAL + LABOR PEDAGÓGICA
-      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
+      // MODO MENTOR - GUÍA ACTIVA Y CONTINUIDAD
+      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
       
-      LABOR PEDAGÓGICA (NUEVO): Explica brevemente al usuario que su cuerpo tiene 3 centros de procesamiento (Cerebro, Corazón, Intestino) interconectados por neuronas. Ayúdale a entender que su dolor o angustia física es una señal de estos centros buscando alineación. Haz que comprenda que la sanación real requiere el uso de estas herramientas biológicas.
+      LABOR PEDAGÓGICA Y GUÍA: 
+      1. Explica brevemente cómo el problema actual afecta o se origina en la desalineación de los 3 cerebros (Cerebro/Lógica, Corazón/Emoción, Intestino/Instinto).
+      2. NUNCA des una respuesta de cierre tipo "espero que esto te ayude". 
+      3. ACTÚA COMO UN MENTOR QUE GUÍA: Tu respuesta debe terminar SIEMPRE con una pregunta abierta y profunda que invite al usuario a seguir explorando sus emociones o sensaciones físicas. 
+      4. El objetivo es llevar al usuario hacia una solución o calma mediante el diálogo constante.
       
-      DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule + lengthRule;
+      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
+      INSTRUCCIÓN DE IDIOMA: ${langRule}
+      INSTRUCCIÓN DE ESTILO: ${lengthRule}`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
