@@ -20,6 +20,8 @@ app.post("/whatsapp", async (req, res) => {
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
+    let detectedLang = "es"; // Por defecto español
+
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -27,14 +29,28 @@ app.post("/whatsapp", async (req, res) => {
         const form = new FormData();
         form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
         form.append('model', 'whisper-1');
-        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } });
+        
+        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { 
+          headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } 
+        });
+        
         mensajeUsuario = whisper.data.text || "";
+        // Whisper es excelente detectando el idioma del audio
+        if (whisper.data.language === 'en') detectedLang = "en";
       } catch (e) { mensajeUsuario = ""; }
     }
 
-    const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario);
-    const langRule = isEnglish ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    // Instrucción para evitar el error de Twilio
+    // Lógica de detección de idioma blindada
+    // Si es texto, usamos una lógica más robusta que solo buscar "hi"
+    const englishPatterns = /\b(hi|hello|how are you|good morning|my name is|i am|english)\b/i;
+    if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) {
+      detectedLang = "en";
+    }
+
+    // REGLA DE ORO: Si ya tenemos un idioma en la base de datos (puedes crear la columna last_lang si quieres persistencia total)
+    // por ahora, usaremos el detector basado en el mensaje actual pero con instrucciones más estrictas.
+    
+    const langRule = detectedLang === "en" ? " Respond ONLY in English. Do not use any Spanish." : " Responde ÚNICAMENTE en español. No uses inglés por ningún motivo.";
     const lengthRule = " IMPORTANTE: Sé profundo pero conciso. Tu respuesta debe tener menos de 1000 caracteres.";
 
     let respuestaFinal = "";
@@ -65,17 +81,18 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR (TU CÓDIGO ORIGINAL CON LÍMITE DE TOKENS)
+      // MODO MENTOR
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
-      DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema.` + langRule + lengthRule;
+      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
+      INSTRUCCIÓN DE IDIOMA: ${langRule}
+      INSTRUCCIÓN DE ESTILO: Responde como mentor profundo. Identifica qué cerebro domina el problema. ${lengthRule}`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 450 // Reducido para no exceder los 1600 caracteres de Twilio
+        max_tokens: 450 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
