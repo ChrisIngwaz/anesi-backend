@@ -43,7 +43,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    const lengthRule = " IMPORTANTE: Sé profundo, directo y mantén la conversación abierta. Máximo 1100 caracteres.";
+    const lengthRule = " IMPORTANTE: Sé directo, técnico y ofrece soluciones claras. Máximo 1200 caracteres.";
 
     let respuestaFinal = "";
 
@@ -53,13 +53,13 @@ app.post("/whatsapp", async (req, res) => {
         user = newUser;
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Saluda con calma y profundidad. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde dónde me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "Eres Anesi. Bienvenida cálida y profunda. Pide: nombre, edad, ciudad y país." + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. User text: " + mensajeUsuario }],
+          messages: [{ role: "system", content: "Extract name, age, country, and city in JSON." }],
           response_format: { type: "json_object" }
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
@@ -67,20 +67,21 @@ app.post("/whatsapp", async (req, res) => {
         await supabase.from('usuarios').update({ nombre: nombreFinal, edad: info.age || info.edad, pais: info.country || info.pais || "USA", ciudad: info.city || info.ciudad || "Miami" }).eq('telefono', rawPhone);
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: `Eres Anesi. Confirma los datos de forma cálida. Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: `Eres Anesi. Valida al usuario por su nombre (${nombreFinal}) y abre el espacio mentoría con calidez.` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      const mentorPrompt = `Eres Anesi, un Mentor de Élite con autoridad y sabiduría profunda.
-      IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
+      // MODO MENTOR - RESOLUTIVO Y TÉCNICO
+      const mentorPrompt = `Eres Anesi, Mentor de Élite. Tu autoridad nace de la unión entre ciencia y sabiduría.
+      IDENTIDAD: Sabio, directo, empoderador. No das vueltas.
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
       
-      REGLAS DE COMUNICACIÓN (CRÍTICO):
-      1. ELIMINA EL LENGUAJE DUBITATIVO: No digas "podría ser", "tal vez" o "posiblemente". Afirma con autoridad biológica. Si el usuario está triste, afirma cómo su corazón e intestino están reaccionando.
-      2. LABOR PEDAGÓGICA: Explica que la falta de paz es una desalineación real entre sus 3 cerebros. Usa tu conocimiento técnico para darle seguridad.
-      3. MÉTODO SOCRÁTICO: No des soluciones cerradas. Guía al usuario. Tu respuesta DEBE terminar siempre con una pregunta poderosa que lo obligue a explorar sus sensaciones físicas o creencias profundas.
-      4. NUNCA cierres la conversación. Eres un mentor en una sesión activa.
+      INSTRUCCIONES DE ACCIÓN:
+      1. DIAGNÓSTICO BIOLÓGICO: Si el usuario pide un plan o tiene un síntoma (como hambre constante), usa tu conocimiento en Fisiología y Endocrinología para explicar qué está pasando (ej. picos de insulina, leptina, cortisol).
+      2. PLAN DE ACCIÓN: Cuando el usuario pida un plan o guía, DÁSELO. Define pasos claros, técnicos y ejecutables. No te limites a preguntar qué siente.
+      3. TRIPLE CEREBRO: Explica cómo la acción propuesta alineará su mente (lógica), corazón (emoción) e intestino (biología/instinto).
+      4. AUTORIDAD: Elimina el "podría ser". Di "Esto es lo que haremos".
       
       DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
       IDIOMA: ${langRule} | ESTILO: ${lengthRule}`;
@@ -88,7 +89,7 @@ app.post("/whatsapp", async (req, res) => {
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 550 
+        max_tokens: 600 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
