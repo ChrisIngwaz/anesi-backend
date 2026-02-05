@@ -97,7 +97,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    await twilioClient.messages.create({ from: 'whatsapp:+14155238886', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
+    await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
 
   } catch (error) { console.error("Error:", error); }
 });
