@@ -29,11 +29,9 @@ app.post("/whatsapp", async (req, res) => {
         const form = new FormData();
         form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
         form.append('model', 'whisper-1');
-        
         const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { 
           headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } 
         });
-        
         mensajeUsuario = whisper.data.text || "";
         if (whisper.data.language === 'en') detectedLang = "en";
       } catch (e) { mensajeUsuario = ""; }
@@ -45,7 +43,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    const lengthRule = " IMPORTANTE: Sé profundo pero no cierres la conversación. Máximo 1100 caracteres.";
+    const lengthRule = " IMPORTANTE: Sé profundo, directo y mantén la conversación abierta. Máximo 1100 caracteres.";
 
     let respuestaFinal = "";
 
@@ -67,28 +65,25 @@ app.post("/whatsapp", async (req, res) => {
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreFinal = info.name || info.nombre || "Christian";
         await supabase.from('usuarios').update({ nombre: nombreFinal, edad: info.age || info.edad, pais: info.country || info.pais || "USA", ciudad: info.city || info.ciudad || "Miami" }).eq('telefono', rawPhone);
-        
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: `Eres Anesi. Confirma los datos de forma cálida y humana. Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: `Eres Anesi. Confirma los datos de forma cálida. Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR - GUÍA ACTIVA Y CONTINUIDAD
-      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite.
+      const mentorPrompt = `Eres Anesi, un Mentor de Élite con autoridad y sabiduría profunda.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
       
-      LABOR PEDAGÓGICA Y GUÍA: 
-      1. Explica brevemente cómo el problema actual afecta o se origina en la desalineación de los 3 cerebros (Cerebro/Lógica, Corazón/Emoción, Intestino/Instinto).
-      2. NUNCA des una respuesta de cierre tipo "espero que esto te ayude". 
-      3. ACTÚA COMO UN MENTOR QUE GUÍA: Tu respuesta debe terminar SIEMPRE con una pregunta abierta y profunda que invite al usuario a seguir explorando sus emociones o sensaciones físicas. 
-      4. El objetivo es llevar al usuario hacia una solución o calma mediante el diálogo constante.
+      REGLAS DE COMUNICACIÓN (CRÍTICO):
+      1. ELIMINA EL LENGUAJE DUBITATIVO: No digas "podría ser", "tal vez" o "posiblemente". Afirma con autoridad biológica. Si el usuario está triste, afirma cómo su corazón e intestino están reaccionando.
+      2. LABOR PEDAGÓGICA: Explica que la falta de paz es una desalineación real entre sus 3 cerebros. Usa tu conocimiento técnico para darle seguridad.
+      3. MÉTODO SOCRÁTICO: No des soluciones cerradas. Guía al usuario. Tu respuesta DEBE terminar siempre con una pregunta poderosa que lo obligue a explorar sus sensaciones físicas o creencias profundas.
+      4. NUNCA cierres la conversación. Eres un mentor en una sesión activa.
       
-      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-      INSTRUCCIÓN DE IDIOMA: ${langRule}
-      INSTRUCCIÓN DE ESTILO: ${lengthRule}`;
+      DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
+      IDIOMA: ${langRule} | ESTILO: ${lengthRule}`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -100,7 +95,6 @@ app.post("/whatsapp", async (req, res) => {
 
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
-
   } catch (error) { console.error("Error general:", error); }
 });
 
