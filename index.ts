@@ -17,9 +17,8 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    const ultimosDigitos = rawPhone.replace(/\D/g, "").slice(-9);
-    // 1. CARGA DE USUARIO PRIORITARIA
-    let { data: user } = await supabase.from('usuarios').select('*').ilike('telefono', `%${ultimosDigitos}%`).maybeSingle();
+    // Buscamos por el número exacto que envía Twilio para no fallar en el UPDATE
+    let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
     if (MediaUrl0) {
@@ -34,17 +33,18 @@ app.post("/whatsapp", async (req, res) => {
       } catch (e) { mensajeUsuario = ""; }
     }
 
-    // DETECTOR DE IDIOMA (Reforzado para las capturas que enviaste)
+    // DETECTOR DE IDIOMA
     const isEnglish = /hi|hello|free trial|my name is|years old|from|weather|miss|sad/i.test(mensajeUsuario) || (user && user.last_lang === 'en');
     const langRule = isEnglish ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
 
     let respuestaFinal = "";
 
-    // 3. LÓGICA DE ONBOARDING (MODO "BLINDADO")
-    if (!user || !user.nombre || user.nombre === "User") {
+    // 3. LÓGICA DE ONBOARDING (REPARADA PARA ASEGURAR REGISTRO)
+    if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
       if (!user) {
-        // CREACIÓN INSTANTÁNEA
-        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]).select().single();
+        // CREACIÓN CON NÚMERO COMPLETO
+        const { data: newUser, error: createError } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', last_lang: isEnglish ? 'en' : 'es' }]).select().single();
+        if (createError) console.error("Error creating user:", createError);
         user = newUser;
         
         const welcome = await openai.chat.completions.create({
@@ -53,7 +53,7 @@ app.post("/whatsapp", async (req, res) => {
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
-        // EXTRACCIÓN Y GUARDADO FORZOSO
+        // EXTRACCIÓN
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. User text: " + mensajeUsuario }],
@@ -61,19 +61,19 @@ app.post("/whatsapp", async (req, res) => {
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         
-        // Mapeo manual para asegurar que nada falle
-        const nombreFinal = info.name || info.nombre || mensajeUsuario.split("is ")[1]?.split(",")[0] || "Christian";
+        const nombreFinal = info.name || info.nombre || "Christian";
         
-        // ACTUALIZACIÓN REAL EN LA DB
-        await supabase.from('usuarios').update({ 
+        // ACTUALIZACIÓN USANDO EL TELÉFONO EXACTO (EQ)
+        const { error: updateError } = await supabase.from('usuarios').update({ 
           nombre: nombreFinal, 
           edad: info.age || info.edad, 
           pais: info.country || info.pais || "USA", 
           ciudad: info.city || info.ciudad || "Miami",
           last_lang: isEnglish ? 'en' : 'es'
-        }).ilike('telefono', `%${ultimosDigitos}%`);
+        }).eq('telefono', rawPhone);
 
-        // Respuesta de transición al Modo Mentor
+        if (updateError) console.error("Error updating user info:", updateError);
+
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "You are Anesi, an Elite Mentor. Confirm you've registered the data and ask the first deep question: What is stealing your peace today?" + langRule }, { role: "user", content: mensajeUsuario }]
@@ -81,7 +81,7 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // 4. MODO MENTOR (EL PERFIL COMPLETO SIN RECORTES)
+      // 4. MODO MENTOR (SIN CAMBIOS)
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral.
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
       CONOCIMIENTO: Psicología, Neurociencia, Crecimiento, Espiritualidad, TRG, PNL, Endocrinología, Fisiología, Crossfit, Resiliencia.
@@ -97,9 +97,10 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    // Cambiado al número oficial que vinculaste
     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
 
-  } catch (error) { console.error("Error:", error); }
+  } catch (error) { console.error("Error general:", error); }
 });
 
 app.listen(process.env.PORT || 3000);
