@@ -53,7 +53,7 @@ app.post("/whatsapp", async (req, res) => {
         user = newUser;
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Saluda con calma y profundidad. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde dónde me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "Eres Anesi. Saluda con calma y profundidad. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde qué ciudad y país me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
