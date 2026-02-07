@@ -59,12 +59,21 @@ app.post("/whatsapp", async (req, res) => {
       } else {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Extract name, age, country, and city in JSON." }],
+          messages: [
+            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city." },
+            { role: "user", content: mensajeUsuario }
+          ],
           response_format: { type: "json_object" }
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreFinal = info.name || info.nombre || "Christian";
-        await supabase.from('usuarios').update({ nombre: nombreFinal, edad: info.age || info.edad, pais: info.country || info.pais || "USA", ciudad: info.city || info.ciudad || "Miami" }).eq('telefono', rawPhone);
+        await supabase.from('usuarios').update({ 
+          nombre: nombreFinal, 
+          edad: info.age || info.edad, 
+          pais: info.country || info.pais, 
+          ciudad: info.city || info.ciudad 
+        }).eq('telefono', rawPhone);
+        
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: `Eres Anesi. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
@@ -72,7 +81,6 @@ app.post("/whatsapp", async (req, res) => {
         respuestaFinal = confirm.choices[0].message.content || "";
       }
     } else {
-      // MODO MENTOR: PERFIL ORIGINAL COMPLETO + NUEVAS MEJORAS
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres un asistente virtual; eres un Mentor de élite que integra la ciencia de vanguardia con la sabiduría ancestral. Eres el Guardián de la Coherencia Humana.
       
       IDENTIDAD: Equilibrio de los 3 órganos (Cerebro, Corazón, Intestino).
