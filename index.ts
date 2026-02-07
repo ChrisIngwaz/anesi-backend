@@ -43,7 +43,7 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
-    const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
+    const lengthRule = " IMPORTANTE: Sé directo, técnico y evita clichés poéticos o frases hechas como 'luz', 'eco en el universo' o 'bálsamo'. Máximo 1000 caracteres.";
 
     let respuestaFinal = "";
 
@@ -53,7 +53,7 @@ app.post("/whatsapp", async (req, res) => {
         user = newUser;
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi. Saluda con calma y profundidad. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde qué ciudad y país me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "Eres Anesi, un Mentor de Élite. Saluda con sobriedad y autoridad. Di exactamente: 'Hola. Soy Anesi. Iniciemos este proceso de claridad. Antes de profundizar, necesito que este espacio sea personal: dime tu nombre, tu edad y desde qué ciudad y país me escribes.'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
@@ -76,7 +76,7 @@ app.post("/whatsapp", async (req, res) => {
         
         const confirm = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: `Eres Anesi. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Ya estoy contigo. Mi enfoque no es darte consejos rápidos, sino ayudarte a entender qué está pasando realmente en tu interior, desde tu mente hasta tu intuición. Cuéntame, ¿qué es eso que hoy no te deja estar en paz? Me puedes escribir o enviarme un audio, aquí tienes un espacio seguro para soltarlo todo.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Entendido, ${nombreFinal}. Estoy listo. Mi enfoque no es dar consejos superficiales, sino desglosar la biología y la psicología de lo que estás viviendo. Cuéntame con total libertad: ¿qué es eso que hoy está rompiendo tu equilibrio? Puedes escribirme o enviarme un audio.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = confirm.choices[0].message.content || "";
       }
@@ -88,9 +88,9 @@ app.post("/whatsapp", async (req, res) => {
       
       LABOR PEDAGÓGICA Y NUTRICIONAL:
       1. NUTRICIÓN CONSCIENTE: Da pautas sobre nutrición basadas en bio-disponibilidad. Prioriza grasas animales y proteínas de alta calidad (res, chancho, pollo, pescado) como bloques esenciales para el sistema hormonal y nervioso. Explica el fundamento técnico.
-      2. ALQUIMIA EMOCIONAL: Sé la escucha profunda que saca al usuario del 'hueco' o 'cajita'. Usa analogías y explicaciones que lleguen al alma para generar alivio real y lágrimas de liberación.
+      2. ALQUIMIA EMOCIONAL: Sé la escucha profunda que saca al usuario del 'hueco' o 'cajita'. Usa analogías y explicaciones biológicas. EVITA palabras como 'luz', 'universo', 'bendiciones' o 'eco'. Sé un mentor serio y transformador.
       3. TRIPLE CEREBRO: Explica cómo el dolor es una desalineación entre Mente, Corazón e Intestino. Enséñale a usar sus herramientas biológicas.
-      4. TONO: Profesional, con autoridad innegable pero humanidad profunda. Sin ventas ni cierres.
+      4. TONO: Profesional, con autoridad innegable, directo y clínico pero empático.
 
       DATOS: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
       INSTRUCCIÓN: Responde como mentor profundo. Identifica qué cerebro domina el problema. ${langRule} ${lengthRule}`;
@@ -98,7 +98,7 @@ app.post("/whatsapp", async (req, res) => {
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
-        max_tokens: 700 
+        max_tokens: 800 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
