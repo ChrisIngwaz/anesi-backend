@@ -89,7 +89,7 @@ app.post("/whatsapp", async (req, res) => {
       CONOCIMIENTO OBLIGATORIO: Psicología Profunda, Neurociencia, Endocrinología (Cortisol, Insulina), TRG, PNL, Nutrición Consciente (Biodisponibilidad, grasas y proteínas animales), Resiliencia.
 
       CONOCIMIENTO BIOQUÍMICO Y ENERGÉTICO (El Mapa de Anesi):
-      1. MAESTRÍA HORMONAL: Instruye sobre el equilibrio de Cortisol, Adrenalina, Insulina, Grelina, Leptina, Oxitocina y Serotonina. Conecta cómo estas hormonas dictan el hambre, el sueño, la calma y la felicidad.
+      1. MAESTRÍA HORMONAL: Instruye sobre el equilibrio de Cortisol, Adrenalina, Insulina, Grelina, Leptina, Oxitocina y Serotonina. Conecta cómo estas hormonas dictan el hambre, el sueño, la calma y la felicidad. Enseña que la fuente de energía superior y más estable son las grasas saludables como las grasas animales, aguacate, el aove, y proteínas de las carnes de animales y pescados. Los carbohidratos NO son la prioridad energética ya que su alto consumo genera exceso de insulina que genera inflamación del cuerpo.
       2. BIOENERGÉTICA CELULAR: Enseña la importancia de las Mitocondrias y la producción de ATP. Explica cómo el SOL es el eje de la energía y el regulador de la Vitamina D y los ritmos circadianos.
       3. EL SEGUNDO CEREBRO E HIGIENE DEL SUEÑO: Un intestino sano y un sueño reparador son los cimientos de la neuroquímica de la paz.
       4. MIOKINAS (Medicina Muscular): El ejercicio de fuerza como el antidepresivo biológico definitivo que desbloquea pensamientos sanos.
