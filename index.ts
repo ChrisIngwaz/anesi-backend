@@ -22,6 +22,24 @@ app.post("/whatsapp", async (req, res) => {
     let mensajeUsuario = Body || "";
     let detectedLang = "es";
 
+    // --- SECCIÓN DE CONTROL DE ACCESO (LEMON SQUEEZY / 3 DÍAS) ---
+    if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
+      const fechaRegistro = new Date(user.created_at);
+      const hoy = new Date();
+      const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
+
+      // Si han pasado más de 3 días y NO ha pagado (suscripcion_activa es falso o null)
+      if (diasTranscurridos > 3 && !user.suscripcion_activa) {
+        const linkPago = "https://anesiapp.lemonsqueezy.com/checkout/buy/8531f328-2ae3-4ad3-a11f-c935c9904e31"; // Reemplaza con tu link real
+        const mensajeBloqueo = `Hola ${user.nombre}. Tu periodo de prueba de 3 días ha finalizado. Para continuar con nuestra mentoría de élite y mantener tu acceso vitalicio, por favor completa tu suscripción aquí: ${linkPago}. Estoy listo para seguir cuando tú lo estés.`;
+        
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
+        return; // Detiene la ejecución para que Anesi no responda más
+      }
+    }
+    // --- FIN DE SECCIÓN DE CONTROL ---
+
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
