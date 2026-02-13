@@ -17,6 +17,24 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
+    // --- NUEVA SECCIÓN DE CONTROL: FILTRO DE BIENVENIDA (PUNTO 1, 2 y 3) ---
+    const mensajeRecibido = Body ? Body.toLowerCase() : "";
+    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
+    const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
+
+    if (esMensajeRegistro) {
+      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde dónde me escribes?";
+      
+      const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await twilioClient.messages.create({ 
+        from: 'whatsapp:+14155730323', 
+        to: `whatsapp:${rawPhone}`, 
+        body: saludoUnico 
+      });
+      return; // Detiene la ejecución aquí para que la IA no responda nada más
+    }
+    // --- FIN DE LA NUEVA SECCIÓN ---
+
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     let mensajeUsuario = Body || "";
