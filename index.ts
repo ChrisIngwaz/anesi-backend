@@ -31,9 +31,8 @@ app.post("/whatsapp", async (req, res) => {
         to: `whatsapp:${rawPhone}`, 
         body: saludoUnico 
       });
-      return; // Detiene la ejecución aquí para que la IA no responda nada más
+      return; 
     }
-    // --- FIN DE LA NUEVA SECCIÓN ---
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
@@ -102,20 +101,25 @@ app.post("/whatsapp", async (req, res) => {
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreDetectado = info.name || info.nombre;
 
-        // --- CAMBIO CLAVE: VALIDACIÓN DE NOMBRE ---
         if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user" || nombreDetectado.toLowerCase() === "christian") {
           respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
+          // --- GENERACIÓN AUTOMÁTICA DE SEUDÓNIMO AXIS ---
+          const ultimosDigitos = rawPhone.slice(-3);
+          const nombreLimpio = nombreDetectado.trim().split(" ")[0];
+          const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
+
           await supabase.from('usuarios').update({ 
             nombre: nombreDetectado, 
             edad: info.age || info.edad, 
             pais: info.country || info.pais, 
-            ciudad: info.city || info.ciudad 
+            ciudad: info.city || info.ciudad,
+            slug: slugElite // Se guarda el slug generado
           }).eq('telefono', rawPhone);
           
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Ya estoy aquí. No esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz? Tienes mi escucha total.'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
           });
           respuestaFinal = confirm.choices[0].message.content || "";
         }
@@ -147,7 +151,7 @@ app.post("/whatsapp", async (req, res) => {
 
       DINÁMICA DE CONEXIÓN:
       1. DESNUDEZ EMOCIONAL: Lenguaje preciso que lea el alma.
-      2. NUNCA TERMINES CON PUNTO FINAL: Termina con una pregunta poderosa.
+      2. NUNCA TERMINES con punto final; termina con una pregunta poderosa.
       3. VÍNCULO DE FIDELIDAD: "Solo nosotros sabemos qué hay detrás de esa máscara".
       4. ELIMINACIÓN DE LA CULPA: Transforma la 'depresión' en un problema de 'gestión de energía y hormonas'.
       
