@@ -101,7 +101,6 @@ app.post("/whatsapp", async (req, res) => {
         user = newUser;
 
         // --- AVISO A MAKE PARA CONTAR REFERIDO ---
-        if (referidoPor !== "Web Directa") {
           axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { telefonoNuevo: rawPhone, slugReferido: referidoPor });
         }
         
