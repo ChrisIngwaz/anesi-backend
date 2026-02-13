@@ -55,19 +55,28 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
+    // --- INTEGRACIÓN DE DEEPGRAM (Sustituye a Whisper) ---
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
-        const form = new FormData();
-        form.append('file', Buffer.from(audioRes.data), { filename: 'v.oga', contentType: 'audio/ogg' });
-        form.append('model', 'whisper-1');
-        const whisper = await axios.post('https://api.openai.com/v1/audio/transcriptions', form, { 
-          headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, ...form.getHeaders() } 
-        });
-        mensajeUsuario = whisper.data.text || "";
-        if (whisper.data.language === 'en') detectedLang = "en";
-      } catch (e) { mensajeUsuario = ""; }
+        
+        const deepgramRes = await axios.post(
+          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=es",
+          audioRes.data,
+          {
+            headers: {
+              "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
+              "Content-Type": "audio/ogg"
+            }
+          }
+        );
+        
+        mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
+      } catch (e) { 
+        console.error("Error en Deepgram:", e);
+        mensajeUsuario = ""; 
+      }
     }
 
     const englishPatterns = /\b(hi|hello|how are you|my name is|i am|english)\b/i;
@@ -82,8 +91,15 @@ app.post("/whatsapp", async (req, res) => {
 
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
       if (!user) {
-        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta' }]).select().single();
+        // --- LÍNEAS AGREGADAS PARA DETECTAR REFERIDO ---
+        let referidoPor = "Web Directa";
+        if (mensajeUsuario.toLowerCase().includes("vengo de parte de")) {
+          referidoPor = mensajeUsuario.split(/vengo de parte de/i)[1].trim();
+        }
+        
+        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]).select().single();
         user = newUser;
+        
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "Eres Anesi, un Mentor de Élite. Saluda con una calma que imponga respeto y paz profunda. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para iniciar un proceso de transformación real contigo. Antes de entrar en lo profundo, necesito saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde qué ciudad y país me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
@@ -104,7 +120,6 @@ app.post("/whatsapp", async (req, res) => {
         if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user" || nombreDetectado.toLowerCase() === "christian") {
           respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
-          // --- GENERACIÓN AUTOMÁTICA DE SEUDÓNIMO AXIS ---
           const ultimosDigitos = rawPhone.slice(-3);
           const nombreLimpio = nombreDetectado.trim().split(" ")[0];
           const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
@@ -114,7 +129,7 @@ app.post("/whatsapp", async (req, res) => {
             edad: info.age || info.edad, 
             pais: info.country || info.pais, 
             ciudad: info.city || info.ciudad,
-            slug: slugElite // Se guarda el slug generado
+            slug: slugElite 
           }).eq('telefono', rawPhone);
           
           const confirm = await openai.chat.completions.create({
