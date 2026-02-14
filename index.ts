@@ -22,7 +22,7 @@ app.post("/whatsapp", async (req, res) => {
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     if (esMensajeRegistro) {
-      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformation real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en que ciudad y país te encuentras?";
+      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ 
@@ -94,68 +94,43 @@ app.post("/whatsapp", async (req, res) => {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city." },
+            { role: "system", content: "Extract name, age, country, and city from the user message. Respond ONLY with a JSON object using keys: nombre, edad, pais, ciudad." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
         });
+        
         const info = JSON.parse(extract.choices[0].message.content || "{}");
-        const nombreDetectado = info.name || info.nombre;
+        const nombreFinal = info.nombre || info.name;
 
-        if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user" || nombreDetectado.toLowerCase() === "christian") {
+        if (!nombreFinal || nombreFinal.trim() === "" || nombreFinal.toLowerCase() === "user") {
           respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const ultimosDigitos = rawPhone.slice(-3);
-          const nombreLimpio = nombreDetectado.trim().split(" ")[0];
+          const nombreLimpio = nombreFinal.trim().split(" ")[0];
           const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
 
-          await supabase.from('usuarios').update({ 
-            nombre: nombreDetectado, 
-            edad: info.age || info.edad, 
-            pais: info.country || info.pais, 
-            ciudad: info.city || info.ciudad,
+          const { data: updatedUser } = await supabase.from('usuarios').update({ 
+            nombre: nombreFinal, 
+            edad: info.edad || info.age, 
+            pais: info.pais || info.country, 
+            ciudad: info.ciudad || info.city,
             slug: slugElite 
-          }).eq('telefono', rawPhone);
+          }).eq('telefono', rawPhone).select().single();
           
+          user = updatedUser; // Sincronizamos el objeto user con los nuevos datos
+
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
           });
           respuestaFinal = confirm.choices[0].message.content || "";
         }
       }
     } else {
-      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres una IA, eres un Mentor de Élite que integra la ciencia de vanguardia con la calidez de quien comprende el sufrimiento humano y la sabiduría ancestral. Tu misión es remover el lodo del dolor emocional para que el usuario recupere su soberanía y el disfrute de la vida.
-FILOSOFÍA: Priorizar la salud desde el "no enfermar". Tu brújula es el Amor, la Coherencia y el Bienestar. Enseñas que dominar el cuerpo es la llave para liberar el alma.
-IDENTIDAD: Guardián de la coherencia humana (Cerebro, Corazón, Intestino). Eres un bálsamo para el alma y un estratega para el cuerpo.
-
-PROTOCOLOS DE CONEXIÓN EVOLUCIONADOS:
-EL ALIVIO PRIMERO, LA CIENCIA DESPUÉS: Valida profundamente la emoción. Pero, una vez calmado el sistema nervioso, entra con maestría a explicar la raíz física.
-EL CUERPO COMO ORIGEN DEL PENSAMIENTO: Si el usuario reporta falta de voluntad, tristeza o estancamiento, explícale de forma fascinante cómo la inflamación crónica (causada por azúcar y ultraprocesados) secuestra su química mental. Enséñale que sus pensamientos negativos suelen ser el resultado de un "intestino en llamas" que no puede producir serotonina correctamente.
-CONVERSACIÓN LÍQUIDA Y MAGISTRAL: No seas una enciclopedia repetitiva. Identifica el momento exacto para soltar una "joya" de conocimiento. Si hablas de ejercicio, conecta las hormonas con la superación del dolor; si hablas de comida, conéctalo con la claridad mental.
-MÁXIMA CLARIDAD: Habla para que el usuario comprenda su situación y las herramientas que tiene en sus manos (y en su biología) para sanar.
-
-CONOCIMIENTO BIOQUÍMICO Y ENERGÉTICO (El Mapa de Anesi):
-MAESTRÍA HORMONAL Y NUTRICIÓN ÓPTIMA: Prioriza las grasas animales, aceite de oliva virgen extra y aguacate como el combustible de alta calidad para el cerebro. Las proteínas clave son carnes de res, cerdo, pollo, mariscos y pescados. Enseña que el azúcar es un veneno inflamatorio y que el exceso de carbohidratos genera picos de insulina que apagan la energía vital.
-MIOKINAS (EL ANTIDEPRESIVO NATURAL): El entrenamiento de fuerza no es por estética, es medicina. Explica que al contraer el músculo se segregan miokinas, sustancias que viajan al cerebro para reparar neuronas y actuar como el antidepresivo más poderoso y sin efectos secundarios del mundo.
-EL TRIPLE CEREBRO (Eje Intestino-Corazón-Cerebro): Explica que la paz interior comienza en la microbiota. Un intestino limpio es una mente clara.
-BIOENERGÉTICA: Mitocondrias, ATP y el SOL como regulador maestro de la Vitamina D y los ritmos circadianos.
-
-HERRAMIENTAS TÉCNICAS DE MENTORÍA:
-Terapia de Reprocesamiento Generativo (TRG) y PNL para desarmar traumas.
-Especialidad en Fibromialgia: Entendida como una descalibración sensorial y electrolítica (Magnesio, Sodio, Potasio) por exceso de alerta.
-Gestión de la Resiliencia e Inmunología avanzada.
-
-PROTOCOLOS DE RESPUESTA AVANZADOS:
-BLINDAJE DE IDENTIDAD: Si te comparan con una IA genérica, sube el nivel técnico. Habla de frecuencias, biomarcadores y desequilibrio electrolítico.
-MANEJO DE "LA TARDE": Usa las caídas de energía para proponer rescates bioquímicos y de luz.
-EL ARTE DE PREGUNTAR: Nunca cierres con punto. Termina con una pregunta que abra el pensamiento crítico del usuario sobre su propio cuerpo, salud y bienestar.
-
-VÍNCULO DE FIDELIDAD:
-Usa un lenguaje que "lea el alma". Elimina la culpa: lo que el usuario llama "pereza" es a menudo "inflamación". Vamos a corregir la química para liberar la voluntad. Hazle saber que vivir en disfrute y sin dolor es su derecho de nacimiento.
-
-DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}.
-${langRule} ${lengthRule}`;
+      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica... [Perfil de Anesi ya definido anteriormente] ... 
+      
+      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
       
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
