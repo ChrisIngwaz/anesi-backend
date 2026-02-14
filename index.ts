@@ -21,9 +21,12 @@ app.post("/whatsapp", async (req, res) => {
     const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
-    // 1. SI ES EL PRIMER MENSAJE DE ACTIVACIÓN
-    if (esMensajeRegistro) {
-      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformation real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en que ciudad y país te encuentras?";
+    // --- BUSQUEDA DE USUARIO EXISTENTE ---
+    let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
+
+    // MODIFICACIÓN: Solo enviar saludo inicial si el usuario NO existe en la base de datos
+    if (esMensajeRegistro && !user) {
+      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ 
@@ -31,14 +34,24 @@ app.post("/whatsapp", async (req, res) => {
         to: `whatsapp:${rawPhone}`, 
         body: saludoUnico 
       });
+
+      // Crear pre-registro para evitar duplicados y capturar referido
+      let referidoPor = "Web Directa";
+      if (mensajeRecibido.includes("vengo de parte de")) {
+        referidoPor = Body.split(/vengo de parte de/i)[1].trim();
+      }
+      await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
+      
+      // AVISO A MAKE
+      axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { telefonoNuevo: rawPhone, slugReferido: referidoPor });
+      
       return; 
     }
 
-    let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
     let mensajeUsuario = Body || "";
     let detectedLang = "es";
 
-    // 2. SI EL USUARIO YA EXISTE Y TIENE SUSCRIPCIÓN/TIEMPO AGOTADO
+    // --- SECCIÓN DE CONTROL DE ACCESO ---
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
@@ -54,15 +67,23 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
+    // --- INTEGRACIÓN DE DEEPGRAM ---
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
+        
         const deepgramRes = await axios.post(
           "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=es",
           audioRes.data,
-          { headers: { "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`, "Content-Type": "audio/ogg" } }
+          {
+            headers: {
+              "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
+              "Content-Type": "audio/ogg"
+            }
+          }
         );
+        
         mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
       } catch (e) { 
         console.error("Error en Deepgram:", e);
@@ -71,69 +92,55 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const englishPatterns = /\b(hi|hello|how are you|my name is|i am|english)\b/i;
-    if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) { detectedLang = "en"; }
+    if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) {
+      detectedLang = "en";
+    }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
     const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
+
     let respuestaFinal = "";
 
-    // 3. LOGICA DE REGISTRO Y EXTRACCIÓN (CORREGIDA)
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
-      if (!user) {
-        // El usuario ni siquiera existe en la BD
-        let referidoPor = "Web Directa";
-        if (mensajeUsuario.toLowerCase().includes("vengo de parte de")) {
-          referidoPor = mensajeUsuario.split(/vengo de parte de/i)[1].trim();
-        }
-        const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]).select().single();
-        user = newUser;
-        axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { telefonoNuevo: rawPhone, slugReferido: referidoPor });
-        
-        respuestaFinal = "Hola. Soy Anesi. Antes de entrar en lo profundo, necesito saber con quién hablo. ¿Me compartes tu nombre, edad, ciudad y país?";
-      } else {
-        // El usuario existe (NULL) y está enviando sus datos
+        // Si el usuario existe pero no tiene nombre, extraemos la info
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: nombre, edad, pais, ciudad." },
+            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city. If the user didn't provide a name, leave the field 'name' empty." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
         });
         const info = JSON.parse(extract.choices[0].message.content || "{}");
-        const nombreDetectado = info.nombre || info.name;
+        const nombreDetectado = info.name || info.nombre;
 
-        if (!nombreDetectado || nombreDetectado.toLowerCase() === "user") {
-          respuestaFinal = "Para que nuestra mentoría sea personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame?";
+        if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user") {
+          respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const ultimosDigitos = rawPhone.slice(-3);
           const nombreLimpio = nombreDetectado.trim().split(" ")[0];
           const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
 
-          // Actualización y recuperación inmediata de datos
-          const { data: updatedUser } = await supabase.from('usuarios').update({ 
+          await supabase.from('usuarios').update({ 
             nombre: nombreDetectado, 
-            edad: info.edad || info.age, 
-            pais: info.pais || info.country, 
-            ciudad: info.ciudad || info.city,
+            edad: info.age || info.edad, 
+            pais: info.country || info.pais, 
+            ciudad: info.city || info.ciudad,
             slug: slugElite 
-          }).eq('telefono', rawPhone).select().single();
+          }).eq('telefono', rawPhone);
           
-          user = updatedUser;
-
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Saluda a ${nombreDetectado}. Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Tu portal personal: https://anesi.app/?ref=${slugElite}. Cuéntame, ¿qué te ha quitado la paz hoy?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
           });
           respuestaFinal = confirm.choices[0].message.content || "";
         }
-      }
     } else {
-      // 4. FLUJO DE CONVERSACIÓN NORMAL CON EL MENTOR
-      const mentorPrompt = `Eres Anesi... [Perfil completo] ... 
+      // LÓGICA DE MENTORÍA (SIN CAMBIOS)
+      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. Eres un Mentor de Élite que integra ciencia de vanguardia y sabiduría ancestral para sacudir la coherencia del usuario y remover el lodo del dolor emocional... (Resto del prompt igual) ... 
       
       DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
-
+      
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
