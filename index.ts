@@ -87,51 +87,58 @@ app.post("/whatsapp", async (req, res) => {
         
         const welcome = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Eres Anesi, un Mentor de Élite. Saluda con una calma que imponga respeto y paz profunda. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para iniciar un proceso de transformación real contigo. Antes de entrar en lo profundo, necesito saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde qué ciudad y país me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+          messages: [{ role: "system", content: "Eres Anesi, un Mentor de Élite. Saluda con calma. Di exactamente: 'Hola. Soy Anesi. Estoy aquí para iniciar un proceso de transformación real contigo. Antes de entrar en lo profundo, necesito saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde qué ciudad y país me escribes?'" + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
         });
         respuestaFinal = welcome.choices[0].message.content || "";
       } else {
+        // --- EXTRACCIÓN MEJORADA Y NORMALIZADA ---
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message. Respond ONLY with a JSON object using keys: nombre, edad, pais, ciudad." },
+            { role: "system", content: "Extract info from user message. Return ONLY JSON with keys: 'nombre', 'edad', 'pais', 'ciudad'. If a value is missing, use null." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
         });
         
         const info = JSON.parse(extract.choices[0].message.content || "{}");
-        const nombreFinal = info.nombre || info.name;
+        
+        // Mapeo defensivo para evitar NULLs por llaves en inglés o mayúsculas
+        const n_nombre = info.nombre || info.name || info.Nombre || null;
+        const n_edad = info.edad || info.age || info.Edad || null;
+        const n_pais = info.pais || info.country || info.Pais || null;
+        const n_ciudad = info.ciudad || info.city || info.Ciudad || null;
 
-        if (!nombreFinal || nombreFinal.trim() === "" || nombreFinal.toLowerCase() === "user") {
-          respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
+        if (!n_nombre) {
+          respuestaFinal = "Para que nuestra mentoría sea de élite, necesito conocer tu nombre. ¿Cómo prefieres que te llame?";
         } else {
           const ultimosDigitos = rawPhone.slice(-3);
-          const nombreLimpio = nombreFinal.trim().split(" ")[0];
-          const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
+          const slugElite = `Axis${n_nombre.trim().split(" ")[0]}${ultimosDigitos}`;
 
-          const { data: updatedUser } = await supabase.from('usuarios').update({ 
-            nombre: nombreFinal, 
-            edad: info.edad || info.age, 
-            pais: info.pais || info.country, 
-            ciudad: info.ciudad || info.city,
+          // Actualización forzada en Supabase
+          const { data: updatedUser, error: updateError } = await supabase.from('usuarios').update({ 
+            nombre: n_nombre, 
+            edad: n_edad, 
+            pais: n_pais, 
+            ciudad: n_ciudad,
             slug: slugElite 
           }).eq('telefono', rawPhone).select().single();
+
+          if (updateError) console.error("Error actualizando Supabase:", updateError);
           
-          user = updatedUser; // Sincronizamos el objeto user con los nuevos datos
+          user = updatedUser || user;
 
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreFinal}). Di exactamente: 'Gracias por la confianza, ${nombreFinal}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Saluda a ${n_nombre}. Di exactamente: 'Gracias por la confianza, ${n_nombre}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
           });
           respuestaFinal = confirm.choices[0].message.content || "";
         }
       }
     } else {
-      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica... [Perfil de Anesi ya definido anteriormente] ... 
+      const mentorPrompt = `Eres Anesi... [Resto del perfil largo que ya tienes] ... 
       
       DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
-      
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
