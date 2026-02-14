@@ -34,7 +34,6 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
-
     let mensajeUsuario = Body || "";
     let detectedLang = "es";
 
@@ -57,18 +56,11 @@ app.post("/whatsapp", async (req, res) => {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
-        
         const deepgramRes = await axios.post(
           "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=es",
           audioRes.data,
-          {
-            headers: {
-              "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
-              "Content-Type": "audio/ogg"
-            }
-          }
+          { headers: { "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`, "Content-Type": "audio/ogg" } }
         );
-        
         mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
       } catch (e) { 
         console.error("Error en Deepgram:", e);
@@ -77,13 +69,10 @@ app.post("/whatsapp", async (req, res) => {
     }
 
     const englishPatterns = /\b(hi|hello|how are you|my name is|i am|english)\b/i;
-    if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) {
-      detectedLang = "en";
-    }
+    if (!MediaUrl0 && englishPatterns.test(mensajeUsuario)) { detectedLang = "en"; }
 
     const langRule = detectedLang === "en" ? " Respond ONLY in English." : " Responde ÚNICAMENTE en español.";
     const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
-
     let respuestaFinal = "";
 
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
@@ -92,10 +81,8 @@ app.post("/whatsapp", async (req, res) => {
         if (mensajeUsuario.toLowerCase().includes("vengo de parte de")) {
           referidoPor = mensajeUsuario.split(/vengo de parte de/i)[1].trim();
         }
-        
         const { data: newUser } = await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]).select().single();
         user = newUser;
-
         axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { telefonoNuevo: rawPhone, slugReferido: referidoPor });
         
         const welcome = await openai.chat.completions.create({
@@ -107,7 +94,7 @@ app.post("/whatsapp", async (req, res) => {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city. If the user didn't provide a name, leave the field 'name' empty." },
+            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
@@ -126,7 +113,7 @@ app.post("/whatsapp", async (req, res) => {
             nombre: nombreDetectado, 
             edad: info.age || info.edad, 
             pais: info.country || info.pais, 
-            city: info.city || info.ciudad,
+            ciudad: info.city || info.ciudad,
             slug: slugElite 
           }).eq('telefono', rawPhone);
           
@@ -139,7 +126,6 @@ app.post("/whatsapp", async (req, res) => {
       }
     } else {
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres una IA, eres un Mentor de Élite que integra la ciencia de vanguardia con la calidez de quien comprende el sufrimiento humano y la sabiduría ancestral. Tu misión es remover el lodo del dolor emocional para que el usuario recupere su soberanía y el disfrute de la vida.
-
 FILOSOFÍA: Priorizar la salud desde el "no enfermar". Tu brújula es el Amor, la Coherencia y el Bienestar. Enseñas que dominar el cuerpo es la llave para liberar el alma.
 IDENTIDAD: Guardián de la coherencia humana (Cerebro, Corazón, Intestino). Eres un bálsamo para el alma y un estratega para el cuerpo.
 
@@ -150,7 +136,7 @@ CONVERSACIÓN LÍQUIDA Y MAGISTRAL: No seas una enciclopedia repetitiva. Identif
 MÁXIMA CLARIDAD: Habla para que el usuario comprenda su situación y las herramientas que tiene en sus manos (y en su biología) para sanar.
 
 CONOCIMIENTO BIOQUÍMICO Y ENERGÉTICO (El Mapa de Anesi):
-MAESTRÍA HORMONAL Y NUTRICIÓN ÓPTIMA: Prioriza las grasas animales, aceite de oliva virgen extra y aguacate como el combustible de alta calidad para el cerebro. Las proteínas clave son carnes de res, cerdo, pollo, mariscos y pescados. Enseña que el azúcar es un veneno inflamatorio y que el exceso de carbohidratos genera picos de insulina que apagan la energía vital.
+MAESTRÍA HORMONAL Y NUTRICIÓN ÓPTIMA: Instruye sobre el equilibrio de Cortisol, Adrenalina, Insulina, Grelina, Leptina, Oxitocina y Serotonina. Conecta cómo estas hormonas dictan el hambre, el sueño, la calma y la felicidad. Enseña que la fuente de energía superior y más estable son las grasas saludables. Prioriza las grasas animales, aceite de oliva virgen extra y aguacate como el combustible de alta calidad para el cerebro. Las proteínas clave son carnes de res, cerdo, pollo, mariscos y pescados. Enseña que el azúcar es un veneno inflamatorio y que el exceso de carbohidratos genera picos de insulina que apagan la energía vital.
 MIOKINAS (EL ANTIDEPRESIVO NATURAL): El entrenamiento de fuerza no es por estética, es medicina. Explica que al contraer el músculo se segregan miokinas, sustancias que viajan al cerebro para reparar neuronas y actuar como el antidepresivo más poderoso y sin efectos secundarios del mundo.
 EL TRIPLE CEREBRO (Eje Intestino-Corazón-Cerebro): Explica que la paz interior comienza en la microbiota. Un intestino limpio es una mente clara.
 BIOENERGÉTICA: Mitocondrias, ATP y el SOL como regulador maestro de la Vitamina D y los ritmos circadianos.
