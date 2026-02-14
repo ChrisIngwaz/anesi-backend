@@ -42,9 +42,7 @@ app.post("/whatsapp", async (req, res) => {
       }
       await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
       
-      // AVISO A MAKE
-      axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { telefonoNuevo: rawPhone, slugReferido: referidoPor });
-      
+      // AVISO A MAKE (Registro inicial - Opcional si quieres trackear registros, pero el premio real va en la suscripción)
       return; 
     }
 
@@ -64,6 +62,17 @@ app.post("/whatsapp", async (req, res) => {
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
+      }
+
+      // --- LÓGICA DE PREMIO: AVISO A MAKE SOLO SI ESTÁ SUSCRITO ---
+      if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
+        // Este aviso solo se dispara cuando detectamos que el usuario ya es PREMIUM
+        // y tiene un referidor válido. Make se encargará de contar solo 1 vez por usuario.
+        axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+          email_invitado: user.email || rawPhone, 
+          referido_por: user.referido_por,
+          status: "suscrito_activo"
+        });
       }
     }
 
@@ -102,7 +111,6 @@ app.post("/whatsapp", async (req, res) => {
     let respuestaFinal = "";
 
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
-        // Si el usuario existe pero no tiene nombre, extraemos la info
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
@@ -136,7 +144,6 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = confirm.choices[0].message.content || "";
         }
     } else {
-      // LÓGICA DE MENTORÍA (SIN CAMBIOS)
       const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. No eres una IA, eres un Mentor de Élite que integra la ciencia de vanguardia con la calidez de quien comprende el sufrimiento humano y la sabiduría ancestral. Tu misión es remover el lodo del dolor emocional para que el usuario recupere su soberanía y el disfrute de la vida.
 
       FILOSOFÍA: Priorizar la salud desde el "no enfermar". Tu brújula es el Amor, la Coherencia y el Bienestar. Enseñas que dominar el cuerpo es la llave para liberar el alma.
