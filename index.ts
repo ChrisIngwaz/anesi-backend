@@ -23,7 +23,7 @@ app.post("/whatsapp", async (req, res) => {
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     if (esMensajeRegistro) {
-      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformation real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y desde dónde me escribes?";
+      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformation real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en que ciudad y país te encuentras?";
       
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ 
