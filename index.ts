@@ -11,6 +11,58 @@ app.use(express.urlencoded({ extended: true }));
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// --- BLOQUE DE CONFIGURACIÓN Y FUNCIONES PAYPHONE ---
+const PAYPHONE_CONFIG = {
+  token: process.env.PAYPHONE_TOKEN,
+  storeId: process.env.PAYPHONE_STORE_ID
+};
+
+/**
+ * Procesa el cobro automático de $9 usando el token de la tarjeta
+ */
+async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
+  const data = {
+    amount: 900,
+    amountWithoutTax: 900,
+    currency: "USD",
+    clientTransactionId: `anesi-${Date.now()}`,
+    email: userEmail,
+    documentId: userId,
+    token: cardToken,
+    storeId: PAYPHONE_CONFIG.storeId
+  };
+
+  try {
+    const response = await axios.post(
+      'https://pay.payphonetodoesposible.com/api/v2/Sale/Token',
+      data,
+      { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+    );
+    return response.data.transactionStatus === 'Approved';
+  } catch (error) {
+    console.error('Error en cobro Payphone:', error.response?.data || error.message);
+    return false;
+  }
+}
+
+// --- RUTA WEBHOOK PARA RECIBIR EL TOKEN (PRIMER PAGO) ---
+app.post("/payphone-webhook", async (req, res) => {
+  const { transactionId, transactionStatus, clientTransactionId, cardToken, email } = req.body;
+
+  if (transactionStatus === 'Approved' && cardToken) {
+    // Extraer el teléfono del clientTransactionId o buscar por email
+    // Aquí actualizamos al usuario en Supabase con su nuevo token y activamos suscripción
+    await supabase.from('usuarios')
+      .update({ 
+        suscripcion_activa: true, 
+        payphone_token: cardToken,
+        ultimo_pago: new Date() 
+      })
+      .eq('email', email);
+  }
+  res.status(200).send("OK");
+});
+
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
@@ -21,10 +73,8 @@ app.post("/whatsapp", async (req, res) => {
     const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
-    // --- BUSQUEDA DE USUARIO EXISTENTE ---
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // MODIFICACIÓN: Solo enviar saludo inicial si el usuario NO existe en la base de datos
     if (esMensajeRegistro && !user) {
       const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
@@ -35,39 +85,32 @@ app.post("/whatsapp", async (req, res) => {
         body: saludoUnico 
       });
 
-      // Crear pre-registro para evitar duplicados y capturar referido
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
       }
       await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
-      
-      // AVISO A MAKE (Registro inicial - Opcional si quieres trackear registros, pero el premio real va en la suscripción)
       return; 
     }
 
     let mensajeUsuario = Body || "";
     let detectedLang = "es";
 
-    // --- SECCIÓN DE CONTROL DE ACCESO ---
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const linkPago = "https://ppls.me/VVO1ZvmA2sgI0D1RJWVBQA"; 
-        const mensajeBloqueo = `Hola ${user.nombre}. Tu periodo de prueba de 3 días ha finalizado. Para continuar con nuestra mentoría de élite y mantener tu acceso vitalicio, por favor completa tu suscripción aquí: ${linkPago}. Estoy listo para seguir cuando tú lo estés.`;
+        const linkPago = "https://anesi.app/pago"; 
+        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago}. (Suscripción mensual: $9, cobro automático para tu comodidad).`;
         
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
 
-      // --- LÓGICA DE PREMIO: AVISO A MAKE SOLO SI ESTÁ SUSCRITO ---
       if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
-        // Este aviso solo se dispara cuando detectamos que el usuario ya es PREMIUM
-        // y tiene un referidor válido. Make se encargará de contar solo 1 vez por usuario.
         axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
           email_invitado: user.email || rawPhone, 
           referido_por: user.referido_por,
@@ -76,7 +119,6 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
-    // --- INTEGRACIÓN DE DEEPGRAM ---
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
