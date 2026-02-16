@@ -109,39 +109,31 @@ app.post("/whatsapp", async (req, res) => {
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     if (esMensajeRegistro && !user) {
-      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
-      
-      const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      await twilioClient.messages.create({ 
-        from: 'whatsapp:+14155730323', 
-        to: `whatsapp:${rawPhone}`, 
-        body: saludoUnico 
-      });
+  // Usamos la IA para que el saludo inicial sea en el idioma del usuario
+  const welcomeResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ 
+      role: "system", 
+      content: "Eres Anesi. El usuario quiere registrarse. Salúdalo con elegancia y profundidad. Dile que estás aquí para acompañarlo en un proceso de claridad y transformación real, pero que antes necesitas saber su nombre, edad, ciudad y país para que el camino sea personal. Responde ÚNICAMENTE en el mismo idioma en el que el usuario te escribió." 
+    }, { role: "user", content: Body }]
+  });
 
-      let referidoPor = "Web Directa";
-      if (mensajeRecibido.includes("vengo de parte de")) {
-        referidoPor = Body.split(/vengo de parte de/i)[1].trim();
-      }
-      await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
-      return; 
-    }
+  const saludoDinamico = welcomeResponse.choices[0].message.content;
+  
+  const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  await twilioClient.messages.create({ 
+    from: 'whatsapp:+14155730323', 
+    to: `whatsapp:${rawPhone}`, 
+    body: saludoDinamico 
+  });
 
-    let mensajeUsuario = Body || "";
-
-    if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
-      const fechaRegistro = new Date(user.created_at);
-      const hoy = new Date();
-      const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
-
-      if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const linkPago = "https://anesi.app/soberania.html"; 
-        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago}. (Suscripción mensual: $9, cobro automático para tu comodidad).`;
-        
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
-        return; 
-      }
-
+  let referidoPor = "Web Directa";
+  if (mensajeRecibido.includes("vengo de parte de")) {
+    referidoPor = Body.split(/vengo de parte de/i)[1].trim();
+  }
+  await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
+  return; 
+}
       if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
         axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
           email_invitado: user.email || rawPhone, 
