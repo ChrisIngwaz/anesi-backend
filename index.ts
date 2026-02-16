@@ -134,6 +134,34 @@ app.post("/whatsapp", async (req, res) => {
   await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
   return; 
 }
+      const fechaRegistro = new Date(user.created_at);
+      const hoy = new Date();
+      const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
+
+      // 1. VERIFICACIÓN DE LOS 3 DÍAS (BLOQUEO POLÍGLOTA)
+      if (diasTranscurridos > 3 && !user.suscripcion_activa) {
+        const linkPago = "https://anesi.app/soberania.html"; 
+        
+        const blockResponse = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ 
+            role: "system", 
+            content: `Eres Anesi. El periodo de prueba de 3 días ha terminado para el usuario ${user.nombre}. Dile de forma elegante y profunda que durante estos días lo has acompañado a explorar las herramientas que ya habitan en él, pero que para mantener este espacio de absoluta claridad, sigilo y privacidad, es momento de activar su acceso permanente aquí: ${linkPago}. Menciona que la suscripción mensual es de $9 con cobro automático. Responde ÚNICAMENTE en el mismo idioma en el que venían hablando.` 
+          }, { role: "user", content: mensajeUsuario }]
+        });
+
+        const mensajeBloqueoDinamico = blockResponse.choices[0].message.content;
+        
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({ 
+          from: 'whatsapp:+14155730323', 
+          to: `whatsapp:${rawPhone}`, 
+          body: mensajeBloqueoDinamico 
+        });
+        return; 
+      }
+
+      // 2. CONEXIÓN CON MAKE PARA REFERIDOS (SÓLO SI ESTÁ ACTIVO)
       if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
         axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
           email_invitado: user.email || rawPhone, 
