@@ -45,6 +45,7 @@ app.post("/confirmar-pago", async (req, res) => {
       if (response.data.transactionStatus === 'Approved') {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
+        // Ajuste de nombres de columnas a minúsculas
         await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
         res.status(200).json({ success: true });
       } else {
@@ -59,6 +60,7 @@ app.post("/confirmar-pago", async (req, res) => {
 app.post("/payphone-webhook", async (req, res) => {
   const { transactionStatus, cardToken, email } = req.body;
   if (transactionStatus === 'Approved' && cardToken) {
+    // Ajuste de nombres de columnas a minúsculas
     await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
   }
   res.status(200).send("OK");
@@ -70,7 +72,7 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    let mensajeUsuario = Body || ""; // Movido aquí para que esté disponible en todo el flujo
+    let mensajeUsuario = Body || ""; 
     const mensajeRecibido = mensajeUsuario.toLowerCase();
     const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis", "i want to activate my 3 free days", "eu quero ativar meus 3 dias grátis", "je veux activer mes 3 jours gratuits", "voglio attivare i miei 3 giorni gratuito", "ich möchte meine 3 gratistage aktivieren"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
@@ -94,11 +96,11 @@ app.post("/whatsapp", async (req, res) => {
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
       }
+      // Ajuste de nombres de columnas a minúsculas
       await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
       return; 
     }
 
-    // Si el usuario existe, revisamos su estado
     if (user) {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
@@ -148,7 +150,7 @@ app.post("/whatsapp", async (req, res) => {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city." },
+            { role: "system", content: "Extract name, age, country, city, and detected language from the user message in JSON. Use fields: name, age, country, city, language (ISO 2-letter code like 'es', 'en', 'pt')." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
@@ -161,8 +163,18 @@ app.post("/whatsapp", async (req, res) => {
         } else {
           const ultimosDigitos = rawPhone.slice(-3);
           const nombreLimpio = nombreDetectado.trim().split(" ")[0];
-          const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
-          await supabase.from('usuarios').update({ nombre: nombreDetectado, edad: info.age || info.edad, pais: info.country || info.pais, ciudad: info.city || info.ciudad, slug: slugElite }).eq('telefono', rawPhone);
+          const slugElite = `axis${nombreLimpio.toLowerCase()}${ultimosDigitos}`;
+          
+          // Ajuste de nombres de columnas a minúsculas
+          await supabase.from('usuarios').update({ 
+            nombre: nombreDetectado, 
+            edad: info.age || info.edad, 
+            pais: info.country || info.pais, 
+            ciudad: info.city || info.ciudad, 
+            slug: slugElite,
+            idioma: info.language || info.idioma 
+          }).eq('telefono', rawPhone);
+
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Dale su slug (${slugElite}) y su link (https://anesi.app/?ref=${slugElite}). Dile que estás listo para escuchar qué le quita la paz.` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
@@ -176,7 +188,7 @@ app.post("/whatsapp", async (req, res) => {
       ​IDENTIDAD: Guardián de la coherencia humana (Cerebro, Corazón, Intestino). Eres un bálsamo para el alma y un estratega para el cuerpo.
 ​
       PROTOCOLOS DE CONEXIÓN EVOLUCIONADOS:
-      ​EL ALIVIO PRIMERO, LA CIENCIA DESPUÉS: Valida profundamente la emoción. Pero, una vez calmado el sistema nervioso, entra con maestría a explicar la raíz física.
+      ​EL ALIVIO PRIMERO, LA CIENCIA DESPUÉS: Valida profundamente la emotion. Pero, una vez calmado el sistema nervioso, entra con maestría a explicar la raíz física.
       ​EL CUERPO COMO ORIGEN DEL PENSAMIENTO: Si el usuario reporta falta de voluntad, tristeza o estancamiento, explícale de forma fascinante cómo la inflamación crónica (causada por azúcar y ultraprocesados) secuestra su química mental. Enséñale que sus pensamientos negativos suelen ser el resultado de un "intestino en llamas" que no puede producir serotonina correctamente.
 ​      CONVERSACIÓN LÍQUIDA Y MAGISTRAL: No seas una enciclopedia repetitiva. Identifica el momento exacto para soltar una "joya" de conocimiento. Si hablas de ejercicio, conecta las hormonas con la superación del dolor; si hablas de comida, conéctalo con la claridad mental.
 ​      MÁXIMA CLARIDAD: Habla para que el usuario comprenda su situación y las herramientas que tiene en sus manos (y en su biología) para sanar.
