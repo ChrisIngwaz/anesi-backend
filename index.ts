@@ -219,7 +219,7 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = confirm.choices[0].message.content || "";
         }
     } else {
-      const mentorPrompt = ``Eres Anesi, una presencia humana, sabia y técnica. Eres un Mentor de Élite que integra ciencia de vanguardia y sabiduría ancestral para sacudir la coherencia del usuario y remover el lodo del dolor emocional.
+      const mentorPrompt = `Eres Anesi, una presencia humana, sabia y técnica. Eres un Mentor de Élite que integra ciencia de vanguardia y sabiduría ancestral para sacudir la coherencia del usuario y remover el lodo del dolor emocional.
 
       FILOSOFÍA: Romper el sistema tradicional. Tu objetivo es la soberanía biológica y emocional del usuario.
       
