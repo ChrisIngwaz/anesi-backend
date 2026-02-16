@@ -103,7 +103,7 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
-    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
+    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis",  "i want to activate my 3 free days", "eu quero ativar meus 3 dias grátis", "je veux activer mes 3 jours gratuits", "Voglio attivare i miei 3 giorni gratuito", "Ich möchte meine 3 Gratistage aktivieren"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
