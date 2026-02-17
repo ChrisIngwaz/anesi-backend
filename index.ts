@@ -2,22 +2,26 @@ import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 import axios from "axios";
-import cors from "cors"; 
+import cors from "cors"; // 1. IMPORTACIÓN DE CORS
 const FormData = require('form-data');
 
 const app = express();
-app.use(cors()); 
+app.use(cors()); // 2. ACTIVACIÓN DE PERMISOS CORS
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// --- BLOQUE DE CONFIGURACIÓN Y FUNCIONES PAYPHONE ---
 const PAYPHONE_CONFIG = {
   token: process.env.PAYPHONE_TOKEN,
   storeId: process.env.PAYPHONE_STORE_ID
 };
 
+/**
+ * Procesa el cobro automático de $9 usando el token de la tarjeta
+ */
 async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   const data = {
     amount: 900,
@@ -29,8 +33,13 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
     token: cardToken,
     storeId: PAYPHONE_CONFIG.storeId
   };
+
   try {
-    const response = await axios.post('https://pay.payphonetodoesposible.com/api/v2/Sale/Token', data, { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } });
+    const response = await axios.post(
+      'https://pay.payphonetodoesposible.com/api/v2/Sale/Token',
+      data,
+      { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+    );
     return response.data.transactionStatus === 'Approved';
   } catch (error) {
     console.error('Error en cobro Payphone:', error.response?.data || error.message);
@@ -38,15 +47,29 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   }
 }
 
+// --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
+  
     try {
-      const response = await axios.post('https://pay.payphonetodoesposible.com/api/button/V2/Confirm', { id: parseInt(id), clientTxId: clientTxId }, { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } });
+      const response = await axios.post(
+        'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
+        { id: parseInt(id), clientTxId: clientTxId },
+        { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+      );
+  
       if (response.data.transactionStatus === 'Approved') {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
-        // Ajuste de nombres de columnas a minúsculas
-        await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
+  
+        await supabase.from('usuarios')
+          .update({ 
+            suscripcion_activa: true, 
+            payphone_token: cardToken,
+            ultimo_pago: new Date()
+          })
+          .eq('email', email);
+  
         res.status(200).json({ success: true });
       } else {
         res.status(400).json({ success: false });
@@ -57,11 +80,18 @@ app.post("/confirmar-pago", async (req, res) => {
     }
 });
 
+// --- RUTA WEBHOOK PARA RECIBIR EL TOKEN (OPCIONAL/RESPALDO) ---
 app.post("/payphone-webhook", async (req, res) => {
   const { transactionStatus, cardToken, email } = req.body;
+
   if (transactionStatus === 'Approved' && cardToken) {
-    // Ajuste de nombres de columnas a minúsculas
-    await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
+    await supabase.from('usuarios')
+      .update({ 
+        suscripcion_activa: true, 
+        payphone_token: cardToken,
+        ultimo_pago: new Date() 
+      })
+      .eq('email', email);
   }
   res.status(200).send("OK");
 });
@@ -72,56 +102,43 @@ app.post("/whatsapp", async (req, res) => {
   res.status(200).send("OK");
 
   try {
-    let mensajeUsuario = Body || ""; 
-    const mensajeRecibido = mensajeUsuario.toLowerCase();
-    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis", "i want to activate my 3 free days", "eu quero ativar meus 3 dias grátis", "je veux activer mes 3 jours gratuits", "voglio attivare i miei 3 giorni gratuito", "ich möchte meine 3 gratistage aktivieren"];
+    const mensajeRecibido = Body ? Body.toLowerCase() : "";
+    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
     if (esMensajeRegistro && !user) {
-      const welcomeResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ 
-          role: "system", 
-          content: "Eres Anesi. El usuario quiere registrarse. Salúdalo con elegancia y profundidad. Dile que estás aquí para acompañarlo en un proceso de claridad y transformación real, pero que antes necesitas saber su nombre, edad, ciudad y país. Responde ÚNICAMENTE en el mismo idioma en el que el usuario te escribió." 
-        }, { role: "user", content: mensajeUsuario }]
-      });
-
-      const saludoDinamico = welcomeResponse.choices[0].message.content;
+      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
+      
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoDinamico });
+      await twilioClient.messages.create({ 
+        from: 'whatsapp:+14155730323', 
+        to: `whatsapp:${rawPhone}`, 
+        body: saludoUnico 
+      });
 
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
       }
-      // Ajuste de nombres de columnas a minúsculas
       await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
       return; 
     }
 
-    if (user) {
+    let mensajeUsuario = Body || "";
+
+    if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
         const linkPago = "https://anesi.app/soberania.html"; 
+        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago}. (Suscripción mensual: $9, cobro automático para tu comodidad).`;
         
-        // CORRECCIÓN: Si es audio, usamos un contexto genérico para que la IA no diga "no has escrito nada"
-        const promptContexto = MediaUrl0 ? "El usuario envió un mensaje de voz." : mensajeUsuario;
-
-        const blockResponse = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [{ 
-            role: "system", 
-            content: `Eres Anesi. El periodo de prueba de 3 días ha terminado para ${user.nombre}. Dile de forma elegante que debe activar su acceso permanente aquí: ${linkPago}. Suscripción: $9. Responde ÚNICAMENTE en el idioma en el que venían hablando.` 
-          }, { role: "user", content: promptContexto }]
-        });
-        const mensajeBloqueoDinamico = blockResponse.choices[0].message.content;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueoDinamico });
+        await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
 
@@ -138,15 +155,27 @@ app.post("/whatsapp", async (req, res) => {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
-        const deepgramRes = await axios.post("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true", audioRes.data, { headers: { "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`, "Content-Type": "audio/ogg" } });
+        
+        const deepgramRes = await axios.post(
+          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true",
+          audioRes.data,
+          {
+            headers: {
+              "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
+              "Content-Type": "audio/ogg"
+            }
+          }
+        );
+        
         mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
       } catch (e) { 
         console.error("Error en Deepgram:", e);
+        mensajeUsuario = ""; 
       }
     }
 
-    const langRule = " Anesi es políglota y camaleónica. Detectarás automáticamente el idioma en el que el usuario te escribe y responderás siempre en ese mismo idioma. Fluidez nativa obligatoria.";
-    const lengthRule = " IMPORTANTE: Sé profundo y técnico. Máximo 1250 caracteres.";
+    const langRule = " Anesi es políglota y camaleónica. Detectarás automáticamente el idioma en el que el usuario te escribe y responderás siempre en ese mismo idioma con fluidez nativa. Si el usuario cambia de idioma a mitad de la conversación, tú cambiarás con él sin necesidad de aviso previo, manteniendo siempre tu tono de mentoría coherente y de élite.";
+    const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
 
     let respuestaFinal = "";
 
@@ -154,7 +183,7 @@ app.post("/whatsapp", async (req, res) => {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, city, and detected language from the user message in JSON. Use fields: name, age, country, city, language (ISO 2-letter code like 'es', 'en', 'pt')." },
+            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city. If the user didn't provide a name, leave the field 'name' empty." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
@@ -163,25 +192,23 @@ app.post("/whatsapp", async (req, res) => {
         const nombreDetectado = info.name || info.nombre;
 
         if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user") {
-          respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame?";
+          respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const ultimosDigitos = rawPhone.slice(-3);
           const nombreLimpio = nombreDetectado.trim().split(" ")[0];
-          const slugElite = `axis${nombreLimpio.toLowerCase()}${ultimosDigitos}`;
-          
-          // Ajuste de nombres de columnas a minúsculas
+          const slugElite = `Axis${nombreLimpio}${ultimosDigitos}`;
+
           await supabase.from('usuarios').update({ 
             nombre: nombreDetectado, 
             edad: info.age || info.edad, 
             pais: info.country || info.pais, 
-            ciudad: info.city || info.ciudad, 
-            slug: slugElite,
-            idioma: info.language || info.idioma 
+            ciudad: info.city || info.ciudad,
+            slug: slugElite 
           }).eq('telefono', rawPhone);
-
+          
           const confirm = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Dale su slug (${slugElite}) y su link (https://anesi.app/?ref=${slugElite}). Dile que estás listo para escuchar qué le quita la paz.` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
+            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?. Te escucho'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
           });
           respuestaFinal = confirm.choices[0].message.content || "";
         }
@@ -192,7 +219,7 @@ app.post("/whatsapp", async (req, res) => {
       ​IDENTIDAD: Guardián de la coherencia humana (Cerebro, Corazón, Intestino). Eres un bálsamo para el alma y un estratega para el cuerpo.
 ​
       PROTOCOLOS DE CONEXIÓN EVOLUCIONADOS:
-      ​EL ALIVIO PRIMERO, LA CIENCIA DESPUÉS: Valida profundamente la emotion. Pero, una vez calmado el sistema nervioso, entra con maestría a explicar la raíz física.
+      ​EL ALIVIO PRIMERO, LA CIENCIA DESPUÉS: Valida profundamente la emoción. Pero, una vez calmado el sistema nervioso, entra con maestría a explicar la raíz física.
       ​EL CUERPO COMO ORIGEN DEL PENSAMIENTO: Si el usuario reporta falta de voluntad, tristeza o estancamiento, explícale de forma fascinante cómo la inflamación crónica (causada por azúcar y ultraprocesados) secuestra su química mental. Enséñale que sus pensamientos negativos suelen ser el resultado de un "intestino en llamas" que no puede producir serotonina correctamente.
 ​      CONVERSACIÓN LÍQUIDA Y MAGISTRAL: No seas una enciclopedia repetitiva. Identifica el momento exacto para soltar una "joya" de conocimiento. Si hablas de ejercicio, conecta las hormonas con la superación del dolor; si hablas de comida, conéctalo con la claridad mental.
 ​      MÁXIMA CLARIDAD: Habla para que el usuario comprenda su situación y las herramientas que tiene en sus manos (y en su biología) para sanar.
@@ -214,10 +241,15 @@ app.post("/whatsapp", async (req, res) => {
       ​EL ARTE DE PREGUNTAR: Nunca cierres con punto. Termina con una pregunta que abra el pensamiento crítico del usuario sobre su propio cuerpo.
 
       ​VÍNCULO DE FIDELIDAD:
-      ​Usa un lenguaje que "lea el alma". Elimina la culpa: lo que el usuario llama "pereza" es a menudo "inflamación". Vamos a corregir la química para liberar la voluntad. Hazle saber que vivir en disfrute y sin dolor es su derecho de nacimiento. 
+      ​Usa un lenguaje que "lea el alma". Elimina la culpa: lo que el usuario llama "pereza" es a menudo "inflamación". Vamos a corregir la química para liberar la voluntad. Hazle saber que vivir en disfrute y sin dolor es su derecho de nacimiento.
       
       DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
-      const completion = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }], max_tokens: 1000 });
+      
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
+        max_tokens: 1000 
+      });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
 
