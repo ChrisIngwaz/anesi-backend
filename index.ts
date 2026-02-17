@@ -108,17 +108,21 @@ app.post("/whatsapp", async (req, res) => {
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
         const linkPago = "https://anesi.app/soberania.html"; 
+        
+        // CORRECCIÓN: Si es audio, usamos un contexto genérico para que la IA no diga "no has escrito nada"
+        const promptContexto = MediaUrl0 ? "El usuario envió un mensaje de voz." : mensajeUsuario;
+
         const blockResponse = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ 
             role: "system", 
             content: `Eres Anesi. El periodo de prueba de 3 días ha terminado para ${user.nombre}. Dile de forma elegante que debe activar su acceso permanente aquí: ${linkPago}. Suscripción: $9. Responde ÚNICAMENTE en el idioma en el que venían hablando.` 
-          }, { role: "user", content: mensajeUsuario }]
+          }, { role: "user", content: promptContexto }]
         });
         const mensajeBloqueoDinamico = blockResponse.choices[0].message.content;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueoDinamico });
-        return; // BLOQUEO CRÍTICO: Detiene el flujo aquí si el usuario expiró.
+        return; 
       }
 
       if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
@@ -130,7 +134,6 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
-    // El procesamiento de Audio solo ocurre si el usuario NO fue bloqueado arriba
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
