@@ -118,7 +118,7 @@ app.post("/whatsapp", async (req, res) => {
         const mensajeBloqueoDinamico = blockResponse.choices[0].message.content;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueoDinamico });
-        return; 
+        return; // BLOQUEO CRÍTICO: Detiene el flujo aquí si el usuario expiró.
       }
 
       if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
@@ -130,6 +130,7 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
+    // El procesamiento de Audio solo ocurre si el usuario NO fue bloqueado arriba
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
