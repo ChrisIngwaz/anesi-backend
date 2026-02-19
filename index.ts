@@ -49,6 +49,8 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 app.post("/confirmar-pago", async (req, res) => {
+// PEGA ESTO EN SU LUGAR:
+app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
   
     try {
@@ -62,13 +64,32 @@ app.post("/confirmar-pago", async (req, res) => {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
   
-        await supabase.from('usuarios')
+        // 1. Buscamos y actualizamos al usuario por email para obtener sus datos (incluyendo referido_por)
+        const { data: userUpdated, error: upError } = await supabase.from('usuarios')
           .update({ 
             suscripcion_activa: true, 
             payphone_token: cardToken,
-            ultimo_pago: new Date()
+            ultimo_pago: new Date(),
+            email: email 
           })
-          .eq('email', email);
+          .eq('email', email)
+          .select()
+          .single();
+
+        // 2. DISPARO HACIA MAKE: Solo si el usuario tiene un mentor asignado
+        if (userUpdated && userUpdated.referido_por && userUpdated.referido_por !== "Web Directa") {
+          try {
+            await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+              email_invitado: email, 
+              referido_por: userUpdated.referido_por,
+              status: "suscrito_activo",
+              nombre_invitado: userUpdated.nombre || "Nuevo Miembro"
+            });
+            console.log("Notificación de referido enviada a Make");
+          } catch (makeErr) {
+            console.error("Error al notificar a Make:", makeErr.message);
+          }
+        }
   
         res.status(200).json({ success: true });
       } else {
