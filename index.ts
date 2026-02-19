@@ -24,8 +24,8 @@ const PAYPHONE_CONFIG = {
  */
 async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   const data = {
-    amount: 100,
-    amountWithoutTax: 100,
+    amount: 900,
+    amountWithoutTax: 900,
     currency: "USD",
     clientTransactionId: `anesi-${Date.now()}`,
     email: userEmail,
@@ -50,67 +50,49 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 // --- RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (MENSAJE DE BIENVENIDA CONFIGURADO) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
-    console.log(`[SISTEMA] Procesando confirmación para ID: ${id}`);
   
     try {
-      let emailPago;
-      let cardToken = "token_prueba_anesi";
+      const response = await axios.post(
+        'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
+        { id: parseInt(id), clientTxId: clientTxId },
+        { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+      );
+  
+      if (response.data.transactionStatus === 'Approved') {
+        const cardToken = response.data.cardToken; 
+        const email = response.data.email;
+  
+        // Actualizamos la suscripción en Supabase y obtenemos los datos del usuario para el mensaje
+        const { data: userData, error: updateError } = await supabase.from('usuarios')
+          .update({ 
+            suscripcion_activa: true, 
+            payphone_token: cardToken,
+            ultimo_pago: new Date()
+          })
+          .eq('email', email)
+          .select();
 
-      // --- BLOQUE DE SEGURIDAD PARA PRUEBAS ---
-      if (id === "1" || id === 1 || clientTxId === "PRUEBA_SISTEMA_ANESI") {
-          console.log("[PRUEBA] Modo de prueba detectado. Saltando validación de Payphone.");
-          // Busca el último usuario que interactuó para enviarle el mensaje a él en la prueba
-          const { data: lastUser } = await supabase.from('usuarios').select('email').order('created_at', { ascending: false }).limit(1).single();
-          emailPago = lastUser?.email; 
+        if (userData && userData.length > 0) {
+          const user = userData[0];
+          const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+          
+          // Bloque del Mensaje de Bienvenida al ser suscriptor
+          const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Desde este momento, tienes acceso total y permanente para que juntos sigamos descifrando tu biología y recuperando tu paz. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+
+          await twilioClient.messages.create({ 
+            from: 'whatsapp:+14155730323', 
+            to: `whatsapp:${user.telefono}`, 
+            body: bienvenidaSoberania 
+          });
+        }
+  
+        res.status(200).json({ success: true });
       } else {
-          // --- FLUJO REAL CON PAYPHONE ---
-          const response = await axios.post(
-            'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
-            { id: parseInt(id), clientTxId: clientTxId },
-            { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
-          );
-
-          if (response.data.transactionStatus !== 'Approved') {
-              return res.status(400).json({ success: false, message: "Pago no aprobado" });
-          }
-          emailPago = response.data.email;
-          cardToken = response.data.cardToken;
+        res.status(400).json({ success: false });
       }
-
-      // --- ACTUALIZACIÓN DE SOBERANÍA EN SUPABASE ---
-      console.log(`[DB] Actualizando suscripción para: ${emailPago}`);
-      const { data: userData, error: updateError } = await supabase.from('usuarios')
-        .update({ 
-          suscripcion_activa: true, 
-          payphone_token: cardToken,
-          ultimo_pago: new Date()
-        })
-        .eq('email', emailPago)
-        .select();
-
-      if (updateError || !userData || userData.length === 0) {
-          console.error("[ERROR DB] No se pudo actualizar. ¿El email existe en la tabla?", emailPago);
-          return res.status(404).json({ success: false, message: "Usuario no encontrado por email" });
-      }
-
-      // --- ENVÍO DEL MENSAJE DE BIENVENIDA ---
-      const user = userData[0];
-      const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      
-      const bienvenidaSoberania = `¡Felicidades, ${user.nombre}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la Ingeniería Humana. Desde este momento, tienes acceso total y permanente. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
-
-      await twilioClient.messages.create({ 
-        from: 'whatsapp:+14155730323', 
-        to: `whatsapp:${user.telefono}`, 
-        body: bienvenidaSoberania 
-      });
-
-      console.log(`[EXITO] Suscripción activa y mensaje enviado a ${user.telefono}`);
-      res.status(200).json({ success: true, message: "Suscripción activada correctamente" });
-
     } catch (error) {
-      console.error("Error en flujo de pago:", error.response?.data || error.message);
-      res.status(500).json({ error: "Falla en la comunicación", detalle: error.message });
+      console.error("Error confirmando pago:", error.response?.data || error.message);
+      res.status(500).send("Error");
     }
 });
 
