@@ -50,7 +50,6 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 // PEGA ESTO EN SU LUGAR:
 app.post("/confirmar-pago", async (req, res) => {
-app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
   
     try {
