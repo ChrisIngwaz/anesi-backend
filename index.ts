@@ -48,74 +48,63 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 }
 
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
-// PEGA ESTO EN SU LUGAR:
-// --- RUTA ACTUALIZADA: CONFIRMACIÓN Y DISPARO A MAKE ---
-// --- RUTA DE ALTA COHERENCIA: CONFIRMACIÓN Y CONEXIÓN TOTAL ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
-    console.log("Iniciando validación de soberanía para ID:", id);
   
     try {
-      // 1. Validamos con Payphone (Si falla por ser prueba manual, usamos bypass)
-      let email = "prueba@anesi.app";
-      let cardToken = "test-token";
-      
-      try {
-        const response = await axios.post(
-          'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
-          { id: parseInt(id), clientTxId: clientTxId },
-          { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
-        );
-        if (response.data.transactionStatus === 'Approved') {
-            email = response.data.email;
-            cardToken = response.data.cardToken;
-        }
-      } catch (payphoneErr) {
-        console.log("Aviso: Bypass activado para prueba manual.");
-      }
-
-      // 2. Buscamos al usuario (Usamos select sin single para evitar el Error 500)
-      const { data: users } = await supabase.from('usuarios').select('*').eq('email', email);
-      const user = (users && users.length > 0) ? users[0] : null;
-
-      // 3. ¡EL DISPARO MAESTRO A MAKE! 
-      // Enviamos datos reales si existen, o genéricos si es una prueba, para que Make aprenda las variables.
-      try {
-        await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-          email_invitado: email, 
-          referido_por: user ? user.referido_por : "Prueba_Manual",
-          status: "suscrito_activo",
-          nombre_invitado: user ? user.nombre : "Invitado de Prueba"
-        });
-        console.log("Señal enviada a Make con éxito.");
-      } catch (makeErr) {
-        console.error("Make no respondió, pero seguimos adelante.");
-      }
-
-      // 4. Activación en Supabase y Bienvenida (Solo si el usuario es real)
-      if (user) {
-        await supabase.from('usuarios').update({ 
+      const response = await axios.post(
+        'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
+        { id: parseInt(id), clientTxId: clientTxId },
+        { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+      );
+  
+      if (response.data.transactionStatus === 'Approved') {
+        const cardToken = response.data.cardToken; 
+        const email = response.data.email;
+  
+        // 1. Actualizamos suscripción y obtenemos datos del usuario en un solo paso
+        const { data: users, error: upError } = await supabase.from('usuarios')
+          .update({ 
             suscripcion_activa: true, 
             payphone_token: cardToken,
-            ultimo_pago: new Date() 
-        }).eq('email', email);
+            ultimo_pago: new Date()
+          })
+          .eq('email', email)
+          .select();
 
-        try {
-          const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-          await twilioClient.messages.create({
-            from: 'whatsapp:+14155730323',
-            to: `whatsapp:${user.telefono}`,
-            body: `¡Victoria, ${user.nombre}! Tu suscripción ha sido activada con éxito. Has tomado el mando de tu biología. Cuéntame, ¿qué es eso que hoy te ha quitado la paz? Te escucho.`
-          });
-        } catch (twErr) { console.error("Error Twilio:", twErr.message); }
-      }
+        const user = (users && users.length > 0) ? users[0] : null;
+
+        if (user) {
+          // 2. DISPARO HACIA MAKE (Para contar el referido al momento del pago)
+          if (user.referido_por && user.referido_por !== "Web Directa") {
+            try {
+              await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+                email_invitado: email, 
+                referido_por: user.referido_por,
+                status: "suscrito_activo",
+                nombre_invitado: user.nombre || "Nuevo Miembro"
+              });
+            } catch (makeErr) { console.error("Error Make:", makeErr.message); }
+          }
+
+          // 3. MENSAJE DE BIENVENIDA (Twilio)
+          try {
+            const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            await twilioClient.messages.create({
+              from: 'whatsapp:+14155730323',
+              to: `whatsapp:${user.telefono}`,
+              body: `¡Victoria, ${user.nombre}! Tu suscripción ha sido activada con éxito. \n\nHas tomado el mando de tu biología y ahora eres oficialmente un Miembro de Élite de Anesi. Desde este momento, nuestra comunicación no tiene límites. \n\nCuéntame, ahora que hemos sellado este compromiso con tu bienestar, ¿qué es eso que hoy te ha quitado la paz? Te escucho.`
+            });
+          } catch (twErr) { console.error("Error Twilio:", twErr.message); }
+        }
   
-      // Siempre respondemos 200 para evitar errores en el navegador o terminal
-      return res.status(200).json({ success: true, message: "Procesado correctamente" });
-
+        res.status(200).json({ success: true });
+      } else {
+        res.status(400).json({ success: false });
+      }
     } catch (error) {
-      console.error("Error crítico en ruta:", error.message);
-      res.status(200).json({ success: false, error: error.message });
+      console.error("Error confirmando pago:", error.response?.data || error.message);
+      res.status(500).send("Error");
     }
 });
 
