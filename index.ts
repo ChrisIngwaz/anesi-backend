@@ -24,8 +24,8 @@ const PAYPHONE_CONFIG = {
  */
 async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   const data = {
-    amount: 100,
-    amountWithoutTax: 100,
+    amount: 900,
+    amountWithoutTax: 900,
     currency: "USD",
     clientTransactionId: `anesi-${Date.now()}`,
     email: userEmail,
