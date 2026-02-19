@@ -49,10 +49,13 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 // PEGA ESTO EN SU LUGAR:
+// --- RUTA ACTUALIZADA: CONFIRMACIÓN Y DISPARO A MAKE ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
+    console.log("Petición de pago recibida. ID:", id, "TxId:", clientTxId);
   
     try {
+      // 1. Validamos con Payphone
       const response = await axios.post(
         'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
         { id: parseInt(id), clientTxId: clientTxId },
@@ -60,11 +63,11 @@ app.post("/confirmar-pago", async (req, res) => {
       );
   
       if (response.data.transactionStatus === 'Approved') {
-        const cardToken = response.data.cardToken; 
         const email = response.data.email;
+        const cardToken = response.data.cardToken || "test-token";
   
-        // 1. Actualizamos al usuario y recuperamos sus datos para el mensaje
-        const { data: userUpdated, error: upError } = await supabase.from('usuarios')
+        // 2. Buscamos y actualizamos al usuario (Usamos .select() sin .single() para evitar Error 500)
+        const { data: users, error: upError } = await supabase.from('usuarios')
           .update({ 
             suscripcion_activa: true, 
             payphone_token: cardToken,
@@ -72,23 +75,29 @@ app.post("/confirmar-pago", async (req, res) => {
             email: email 
           })
           .eq('email', email)
-          .select()
-          .single();
+          .select();
 
-        if (userUpdated) {
-          // 2. DISPARO HACIA MAKE (Para los referidos)
-          if (userUpdated.referido_por && userUpdated.referido_por !== "Web Directa") {
-            try {
-              await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-                email_invitado: email, 
-                referido_por: userUpdated.referido_por,
-                status: "suscrito_activo",
-                nombre_invitado: userUpdated.nombre || "Nuevo Miembro"
-              });
-            } catch (makeErr) { console.error("Error Make:", makeErr.message); }
-          }
+        const userUpdated = (users && users.length > 0) ? users[0] : null;
 
-          // 3. MENSAJE DE BIENVENIDA POR WHATSAPP (Twilio)
+        // 3. DISPARO HACIA MAKE (Crucial para que aparezcan las variables)
+        // Definimos datos de respaldo si el usuario no existe aún en la DB (para pruebas)
+        const referido = userUpdated ? userUpdated.referido_por : "Web Directa";
+        const nombreParaMake = userUpdated ? userUpdated.nombre : "Usuario de Prueba";
+
+        try {
+          await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+            email_invitado: email, 
+            referido_por: referido,
+            status: "suscrito_activo",
+            nombre_invitado: nombreParaMake
+          });
+          console.log("Datos enviados a Make con éxito");
+        } catch (makeErr) { 
+          console.error("Error al contactar Make:", makeErr.message); 
+        }
+
+        // 4. MENSAJE DE BIENVENIDA (Solo si el usuario existe en nuestra base)
+        if (userUpdated && userUpdated.telefono) {
           try {
             const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
             await twilioClient.messages.create({
@@ -100,19 +109,21 @@ Has tomado el mando de tu biología y ahora eres oficialmente un Miembro de Éli
 
 Cuéntame, ahora que hemos sellado este compromiso con tu bienestar, ¿qué es eso que hoy te ha quitado la paz? Te escucho.`
             });
-            console.log("Mensaje de bienvenida enviado con éxito");
+            console.log("Mensaje de WhatsApp enviado.");
           } catch (twilioErr) {
-            console.error("Error enviando WhatsApp de bienvenida:", twilioErr.message);
+            console.error("Error Twilio:", twilioErr.message);
           }
         }
   
-        res.status(200).json({ success: true });
+        return res.status(200).json({ success: true });
       } else {
-        res.status(400).json({ success: false });
+        return res.status(400).json({ success: false, message: "No aprobado" });
       }
     } catch (error) {
-      console.error("Error confirmando pago:", error.response?.data || error.message);
-      res.status(500).send("Error");
+      console.error("Error en confirmar-pago:", error.message);
+      // Respondemos 200 para que el webhook de Payphone no reintente infinitamente, 
+      // pero el log nos dirá la verdad.
+      res.status(200).json({ success: false, error: error.message });
     }
 });
 
