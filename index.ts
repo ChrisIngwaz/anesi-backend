@@ -50,6 +50,7 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 // PEGA ESTO EN SU LUGAR:
 app.post("/confirmar-pago", async (req, res) => {
+app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
   
     try {
@@ -63,7 +64,7 @@ app.post("/confirmar-pago", async (req, res) => {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
   
-        // 1. Buscamos y actualizamos al usuario por email para obtener sus datos (incluyendo referido_por)
+        // 1. Actualizamos al usuario y recuperamos sus datos para el mensaje
         const { data: userUpdated, error: upError } = await supabase.from('usuarios')
           .update({ 
             suscripcion_activa: true, 
@@ -75,18 +76,34 @@ app.post("/confirmar-pago", async (req, res) => {
           .select()
           .single();
 
-        // 2. DISPARO HACIA MAKE: Solo si el usuario tiene un mentor asignado
-        if (userUpdated && userUpdated.referido_por && userUpdated.referido_por !== "Web Directa") {
+        if (userUpdated) {
+          // 2. DISPARO HACIA MAKE (Para los referidos)
+          if (userUpdated.referido_por && userUpdated.referido_por !== "Web Directa") {
+            try {
+              await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+                email_invitado: email, 
+                referido_por: userUpdated.referido_por,
+                status: "suscrito_activo",
+                nombre_invitado: userUpdated.nombre || "Nuevo Miembro"
+              });
+            } catch (makeErr) { console.error("Error Make:", makeErr.message); }
+          }
+
+          // 3. MENSAJE DE BIENVENIDA POR WHATSAPP (Twilio)
           try {
-            await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-              email_invitado: email, 
-              referido_por: userUpdated.referido_por,
-              status: "suscrito_activo",
-              nombre_invitado: userUpdated.nombre || "Nuevo Miembro"
+            const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            await twilioClient.messages.create({
+              from: 'whatsapp:+14155730323',
+              to: `whatsapp:${userUpdated.telefono}`,
+              body: `¡Victoria, ${userUpdated.nombre}! Tu suscripción ha sido activada con éxito. 
+
+Has tomado el mando de tu biología y ahora eres oficialmente un Miembro de Élite de Anesi. Desde este momento, nuestra comunicación no tiene límites. 
+
+Cuéntame, ahora que hemos sellado este compromiso con tu bienestar, ¿qué es eso que hoy te ha quitado la paz? Te escucho.`
             });
-            console.log("Notificación de referido enviada a Make");
-          } catch (makeErr) {
-            console.error("Error al notificar a Make:", makeErr.message);
+            console.log("Mensaje de bienvenida enviado con éxito");
+          } catch (twilioErr) {
+            console.error("Error enviando WhatsApp de bienvenida:", twilioErr.message);
           }
         }
   
