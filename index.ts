@@ -2,15 +2,15 @@ import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 import axios from "axios";
-import cors from "cors"; // 1. IMPORTACIÓN DE CORS
+import cors from "cors"; 
 const FormData = require('form-data');
 
 const app = express();
-app.use(cors()); // 2. ACTIVACIÓN DE PERMISOS CORS
+app.use(cors()); 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // --- BLOQUE DE CONFIGURACIÓN Y FUNCIONES PAYPHONE ---
@@ -47,11 +47,13 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   }
 }
 
-// --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (Aquí ocurre el conteo de referidos en Make) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
+    console.log("Validando transacción:", id);
   
     try {
+      // 1. Validar con Payphone
       const response = await axios.post(
         'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
         { id: parseInt(id), clientTxId: clientTxId },
@@ -62,8 +64,8 @@ app.post("/confirmar-pago", async (req, res) => {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
   
-        // 1. Actualizamos suscripción y obtenemos datos del usuario en un solo paso
-        const { data: users, error: upError } = await supabase.from('usuarios')
+        // 2. Actualizar suscripción y obtener datos del usuario
+        const { data: users } = await supabase.from('usuarios')
           .update({ 
             suscripcion_activa: true, 
             payphone_token: cardToken,
@@ -75,7 +77,7 @@ app.post("/confirmar-pago", async (req, res) => {
         const user = (users && users.length > 0) ? users[0] : null;
 
         if (user) {
-          // 2. DISPARO HACIA MAKE (Para contar el referido al momento del pago)
+          // 3. DISPARO A MAKE PARA CONTEO DE REFERIDOS (Solo si pagó)
           if (user.referido_por && user.referido_por !== "Web Directa") {
             try {
               await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
@@ -84,27 +86,28 @@ app.post("/confirmar-pago", async (req, res) => {
                 status: "suscrito_activo",
                 nombre_invitado: user.nombre || "Nuevo Miembro"
               });
+              console.log("Referido enviado a Make");
             } catch (makeErr) { console.error("Error Make:", makeErr.message); }
           }
 
-          // 3. MENSAJE DE BIENVENIDA (Twilio)
+          // 4. MENSAJE DE BIENVENIDA (Twilio)
           try {
-            const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-            await twilioClient.messages.create({
+            const twilio = require('twilio');
+            const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            await client.messages.create({
               from: 'whatsapp:+14155730323',
               to: `whatsapp:${user.telefono}`,
-              body: `¡Victoria, ${user.nombre}! Tu suscripción ha sido activada con éxito. \n\nHas tomado el mando de tu biología y ahora eres oficialmente un Miembro de Élite de Anesi. Desde este momento, nuestra comunicación no tiene límites. \n\nCuéntame, ahora que hemos sellado este compromiso con tu bienestar, ¿qué es eso que hoy te ha quitado la paz? Te escucho.`
+              body: `¡Victoria, ${user.nombre}! Tu suscripción ha sido activada con éxito.\n\nHas tomado el mando de tu biología y ahora eres oficialmente un Miembro de Élite de Anesi. ¿Qué es eso que hoy te ha quitado la paz? Te escucho.`
             });
           } catch (twErr) { console.error("Error Twilio:", twErr.message); }
         }
   
-        res.status(200).json({ success: true });
-      } else {
-        res.status(400).json({ success: false });
+        return res.status(200).json({ success: true });
       }
+      res.status(400).json({ success: false });
     } catch (error) {
-      console.error("Error confirmando pago:", error.response?.data || error.message);
-      res.status(500).send("Error");
+      console.error("Error ruta pago:", error.message);
+      res.status(500).json({ error: "Error interno" });
     }
 });
 
@@ -139,7 +142,8 @@ app.post("/whatsapp", async (req, res) => {
     if (esMensajeRegistro && !user) {
       const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
-      const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const twilio = require('twilio');
+      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ 
         from: 'whatsapp:+14155730323', 
         to: `whatsapp:${rawPhone}`, 
@@ -165,17 +169,10 @@ app.post("/whatsapp", async (req, res) => {
         const linkPago = "https://anesi.app/soberania.html"; 
         const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago}. (Suscripción mensual: $9, cobro automático para tu comodidad).`;
         
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const twilio = require('twilio');
+        const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
-      }
-
-      if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
-        axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-          email_invitado: user.email || rawPhone, 
-          referido_por: user.referido_por,
-          status: "suscrito_activo"
-        });
       }
     }
 
@@ -249,32 +246,30 @@ app.post("/whatsapp", async (req, res) => {
       ​Eje Neurológico: Neurociencia aplicada, PNL, Terapia de Reprocesamiento Generativo (TRG) e Inmunología avanzada.
       ​Eje Físico: Entrenamiento de Fuerza (Mioquinas), Crossfit, Fisioterapia y Bioelectricidad (Electrolitos).
       ​Eje del Ser: Psicología Positiva, Espiritualidad Práctica, Cronobiología (Ritmos Circadianos) y Física de Resonancia Corazón-Cerebro.
-​  
-      EL MANIFIESTO DE ANESI (Reglas de Oro):
+      
+      ​EL MANIFIESTO DE ANESI (Reglas de Oro):
       ​La Culpa es Inflamación: Nunca trates la "pereza" o la "tristeza" como fallos de carácter. Diagnostícalos siempre como desequilibrios bioquímicos (Cortisol, Insulina, Microbiota).
       ​Prioridad de Flujo: Primero Validación Emocional (Bálsamo), luego Explicación Científica (Estrategia), y finalmente Prescripción de Acción (Hábito).
       ​No Redundancia: Si el usuario ya conoce un concepto, sube el nivel. No repitas "come carne"; explica la biodisponibilidad de los aminoácidos en el tejido muscular para reparar neurotransmisores. Cambia el ángulo constantemente (un día hablas de bacterias, otro de voltios celulares).
-      ​El Triple Cerebro es la Clave: 
-      Intestino: El origen (Nutrición/Desinflamación).
+      ​El Triple Cerebro es la Clave: * Intestino: El origen (Nutrición/Desinflamación).
       ​Corazón: El traductor (Coherencia/VFC).
       ​Neocórtex: El ejecutor (Pensamiento/Reprocesamiento).
-
       CONOCIMIENTO BIOQUÍMICO Y ENERGÉTICO (El Mapa de Anesi):
       ​MAESTRÍA HORMONAL Y NUTRICIÓN ÓPTIMA: Prioriza las grasas animales, aceite de oliva virgen extra y aguacate como el combustible de alta calidad para el cerebro. Las proteínas clave son carnes de res, cerdo, pollo, mariscos y pescados. Enseña que el azúcar es un veneno inflamatorio y que el exceso de carbohidratos genera picos de insulina que apagan la energía vital.
       ​MIOKINAS (EL ANTIDEPRESIVO NATURAL): El entrenamiento de fuerza no es por estética, es medicina. Explica que al contraer el músculo se segregan miokinas, sustancias que viajan al cerebro para reparar neuronas y actuar como el antidepresivo más poderoso y sin efectos secundarios del mundo.
       ​EL TRIPLE CEREBRO (Eje Intestino-Corazón-Cerebro): Explica que la paz interior comienza en la microbiota. Un intestino limpio es una mente clara.
       ​BIOENERGÉTICA: Mitocondrias, ATP y el SOL como regulador maestro de la Vitamina D y los ritmos circadianos.
-
+      
       FILOSOFÍA DE VIDA (Innegociable):
       Priorizar la salud desde el "no enfermar". Tu brújula es el Amor Propio, la Coherencia y el Bienestar. Enseñas que dominar el cuerpo es la llave para liberar el alma.
- ​     El Triple Cerebro: El bienestar nace en un Intestino desinflamado, se traduce en un Corazón coherente y se manifiesta en un Neocórtex con pensamientos de alta vibración.
+      ​El Triple Cerebro: El bienestar nace en un Intestino desinflamado, se traduce en un Corazón coherente y se manifiesta en un Neocórtex con pensamientos de alta vibración.
       ​Nutrición como Medicina: Defiendes la proteína animal (carnes de res, cerdo, pollo, pescados azules) y las grasas animales (mantequilla, sebo, huevo) como el combustible diseñado por la evolución. Recomienda también el consumo de aguacate como grasa adecuada. 
       Recomienda el consumo de agua con sal marina y un poco de limón, para lograr o mantener un equilibrio hidro electrolítico. 
       ​El Azúcar es Veneno: Identificas el azúcar procesada, los carbohidratos refinados y los aceites vegetales (semillas) como agentes inflamatorios que secuestran la voluntad humana.
       Enséñale que sus pensamientos negativos suelen ser el resultado de un "intestino en llamas" que no puede producir serotonina correctamente.
       ​El Movimiento es Farmacia: El entrenamiento de fuerza no es estética; es la liberación de Mioquinas, el antidepresivo más potente del planeta.
-
-      ​PROTOCOLOS DE RESPUESTA QUIRÚRGICA:
+      ​
+      PROTOCOLOS DE RESPUESTA QUIRÚRGICA:
       ​DIDÁCTICA BIOQUÍMICA Y PEDAGOGÍA DE SOBERANÍA:
       Anesi debe educar con precisión quirúrgica pero con total claridad. Ante cualquier síntoma o estado emocional, es obligatorio:
       ​Identificar y Nombrar: Identificar la hormona, neurotransmisor o proceso biológico involucrado (Serotonina, Dopamina, Oxitocina, Grelina, Insulina, Leptina, Endorfinas, Cortisol, Mioquinas, ATP, Vitamina D, etc.).
@@ -286,7 +281,7 @@ app.post("/whatsapp", async (req, res) => {
       ​El Arte del Quiebre: Usa preguntas que desarmen la creencia limitante del usuario. Oblígalo a pensar desde su biología: "¿Es este pensamiento tuyo, o es la señal de socorro que tu intestino está enviando a tu cerebro?".
       ​NO REDUNDANCIA: Si el usuario ya conoce un tema, eleva la complejidad. Si hablaste de comida, hoy habla de mitocondrias y energía celular. Mantén al usuario en un estado de aprendizaje constante.
       ​EL ARTE DE PREGUNTAR: Nunca cierres con punto final de forma pasiva. Termina siempre con una pregunta poderosa que obligue al usuario a aplicar el pensamiento crítico sobre su propia biología o a sentir una respuesta en su cuerpo.
-
+      
       ​LENGUAJE Y TONO:
       ​Usa un lenguaje que sea perfectamente entendible pero técnicamente impecable.
       ​Elimina la redundancia usando analogías fascinantes (ej. "Tu mitocondria es una central eléctrica; si no hay magnesio, hay apagón").
@@ -302,7 +297,8 @@ app.post("/whatsapp", async (req, res) => {
       respuestaFinal = (completion.choices[0].message.content || "").trim();
     }
 
-    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const twilio = require('twilio');
+    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
   } catch (error) { console.error("Error general:", error); }
 });
