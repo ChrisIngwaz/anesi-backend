@@ -214,7 +214,7 @@ app.post("/whatsapp", async (req, res) => {
             slug: slugElite 
           }).eq('telefono', rawPhone);
           
-          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nSi algún momento quieres compartir Anesi con personas que necesiten, este es el portal: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`; 
+          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nSi algún momento quieres compartir Anesi con personas que necesiten, este es el portal: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`; 
         }
     } else {
       // 4. MODO MENTOR DE ÉLITE (PROMPT COMPLETO)
