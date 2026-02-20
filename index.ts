@@ -50,6 +50,9 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 // --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
+    
+    console.log("=== CONFIRMAR PAGO INICIADO ===");
+    console.log("ID:", id, "ClientTxId:", clientTxId);
   
     try {
       const response = await axios.post(
@@ -57,42 +60,135 @@ app.post("/confirmar-pago", async (req, res) => {
         { id: parseInt(id), clientTxId: clientTxId },
         { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
       );
+      
+      console.log("Respuesta Payphone:", response.data);
   
       if (response.data.transactionStatus === 'Approved') {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
-        const phoneNumber = response.data.phoneNumber; // Payphone devuelve el teléfono del pago
-  
-        const { data: userData, error: updateError } = await supabase.from('usuarios')
-          .update({ 
-            suscripcion_activa: true, 
-            payphone_token: cardToken,
-            email: email, // Guardamos el email si no existía
-            ultimo_pago: new Date()
-          })
-          .or(`email.eq.${email},telefono.eq.${phoneNumber}`) // Busca por email O por teléfono
-          .select();
-
-        if (userData && userData.length > 0) {
-          const user = userData[0];
-          const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-          
-          const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Desde este momento, tienes acceso total y permanente para que juntos sigamos descifrando tu biología y recuperando tu paz. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
-
-          await twilioClient.messages.create({ 
-            from: 'whatsapp:+14155730323', 
-            to: `whatsapp:${user.telefono}`, 
-            body: bienvenidaSoberania 
-          });
+        const phoneNumber = response.data.phoneNumber;
+        
+        console.log("Pago aprobado. Email:", email, "Tel:", phoneNumber);
+        
+        // Normalizar teléfono (quitar + para búsqueda flexible)
+        const phoneVariations = [];
+        if (phoneNumber) {
+            phoneVariations.push(phoneNumber); // original
+            phoneVariations.push(phoneNumber.replace('+', '')); // sin +
+            phoneVariations.push(phoneNumber.replace('+', '00')); // con 00
         }
-  
-        res.status(200).json({ success: true });
+        
+        // Buscar usuario en Supabase (múltiples intentos)
+        let user = null;
+        
+        // Intentar por email primero
+        if (email) {
+            const { data, error } = await supabase
+                .from('usuarios')
+                .select('*')
+                .eq('email', email)
+                .maybeSingle();
+            if (data) user = data;
+            if (error) console.error("Error buscando por email:", error);
+        }
+        
+        // Si no encontró, intentar por teléfono
+        if (!user && phoneNumber) {
+            for (const phoneVariant of phoneVariations) {
+                const { data, error } = await supabase
+                    .from('usuarios')
+                    .select('*')
+                    .or(`telefono.eq.${phoneVariant},telefono.ilike.%${phoneVariant.slice(-9)}`)
+                    .maybeSingle();
+                if (data) {
+                    user = data;
+                    console.log("Usuario encontrado por teléfono:", phoneVariant);
+                    break;
+                }
+                if (error) console.error("Error buscando por teléfono:", phoneVariant, error);
+            }
+        }
+        
+        // Si encontramos usuario, actualizar y enviar mensaje
+        if (user) {
+            console.log("Usuario encontrado:", user.id, user.nombre, user.telefono);
+            
+            // Actualizar Supabase
+            const { error: updateError } = await supabase
+                .from('usuarios')
+                .update({ 
+                    suscripcion_activa: true, 
+                    payphone_token: cardToken,
+                    email: email || user.email,
+                    ultimo_pago: new Date()
+                })
+                .eq('id', user.id);
+                
+            if (updateError) {
+                console.error("Error actualizando Supabase:", updateError);
+            } else {
+                console.log("Supabase actualizado correctamente");
+            }
+            
+            // Enviar mensaje de bienvenida por WhatsApp
+            try {
+                const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                
+                const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Desde este momento, tienes acceso total y permanente para que juntos sigamos descifrando tu biología y recuperando tu paz. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+
+                const messageResult = await twilioClient.messages.create({ 
+                    from: 'whatsapp:+14155730323', 
+                    to: `whatsapp:${user.telefono}`, 
+                    body: bienvenidaSoberania 
+                });
+                
+                console.log("Mensaje de bienvenida enviado. SID:", messageResult.sid);
+                
+            } catch (twilioError) {
+                console.error("Error enviando mensaje Twilio:", twilioError);
+            }
+            
+            // Notificar a Make si hay referido
+            if (user.referido_por && user.referido_por !== "Web Directa") {
+                try {
+                    await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
+                        email_invitado: user.email || phoneNumber, 
+                        referido_por: user.referido_por,
+                        status: "suscrito_activo"
+                    });
+                } catch (makeError) {
+                    console.error("Error notificando a Make:", makeError);
+                }
+            }
+            
+            res.status(200).json({ success: true, message: "Usuario activado" });
+            
+        } else {
+            console.error("No se encontró usuario para:", email, phoneNumber);
+            console.error("Variaciones de teléfono buscadas:", phoneVariations);
+            res.status(404).json({ 
+                success: false, 
+                error: "Usuario no encontrado",
+                email: email,
+                phone: phoneNumber 
+            });
+        }
+        
       } else {
-        res.status(400).json({ success: false });
+        console.log("Transacción no aprobada:", response.data.transactionStatus);
+        res.status(400).json({ 
+            success: false, 
+            message: "Transacción no aprobada",
+            status: response.data.transactionStatus 
+        });
       }
     } catch (error) {
       console.error("Error confirmando pago:", error.response?.data || error.message);
-      res.status(500).send("Error");
+      res.status(500).json({ 
+          success: false, 
+          error: "Error interno del servidor",
+          details: error.message 
+      });
     }
 });
 
