@@ -44,7 +44,62 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   }
 }
 
-// --- NUEVA RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
+// --- NUEVA RUTA: GUARDAR EMAIL DEL USUARIO ---
+app.post("/guardar-email", async (req, res) => {
+    const { telefono, email } = req.body;
+    
+    console.log("=== GUARDAR EMAIL ===");
+    console.log("Teléfono:", telefono, "Email:", email);
+    
+    if (!telefono || !email) {
+        return res.status(400).json({ success: false, error: "Teléfono y email requeridos" });
+    }
+    
+    try {
+        // Normalizar teléfono
+        const phoneVariations = [telefono, telefono.replace('+', ''), telefono.replace('+', '00')];
+        
+        let user = null;
+        
+        // Buscar por teléfono
+        for (const phoneVariant of phoneVariations) {
+            const { data, error } = await supabase
+                .from('usuarios')
+                .select('*')
+                .or(`telefono.eq.${phoneVariant},telefono.ilike.%${phoneVariant.slice(-9)}`)
+                .maybeSingle();
+            if (data) {
+                user = data;
+                break;
+            }
+        }
+        
+        if (user) {
+            // Actualizar email
+            const { error: updateError } = await supabase
+                .from('usuarios')
+                .update({ email: email })
+                .eq('id', user.id);
+                
+            if (updateError) {
+                console.error("Error actualizando email:", updateError);
+                return res.status(500).json({ success: false, error: "Error actualizando email" });
+            }
+            
+            console.log("Email guardado correctamente para usuario:", user.id);
+            res.status(200).json({ success: true, message: "Email guardado" });
+        } else {
+            console.error("Usuario no encontrado para teléfono:", telefono);
+            res.status(404).json({ success: false, error: "Usuario no encontrado" });
+        }
+        
+    } catch (error) {
+        console.error("Error en guardar-email:", error);
+        res.status(500).json({ success: false, error: "Error interno" });
+    }
+});
+
+// --- RUTA: CONFIRMACIÓN DESDE PÁGINA WEB (Captura Token) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     
@@ -134,7 +189,6 @@ app.post("/whatsapp", async (req, res) => {
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // 1. FLUJO DE REGISTRO INICIAL (Pide datos)
     if (esMensajeRegistro && (!user || !user.nombre)) {
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
@@ -153,7 +207,6 @@ app.post("/whatsapp", async (req, res) => {
 
     let mensajeUsuario = Body || "";
 
-    // 2. VERIFICACIÓN DE SUSCRIPCIÓN (3 DÍAS)
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
@@ -169,7 +222,6 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
-    // PROCESAMIENTO DE AUDIO
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -186,7 +238,6 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // 3. CAPTURA DE DATOS Y MENSAJE DE BIENVENIDA CON LINK LIMPIO
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -214,10 +265,9 @@ app.post("/whatsapp", async (req, res) => {
             slug: slugElite 
           }).eq('telefono', rawPhone);
           
-          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nSi algún momento quieres compartir Anesi con personas que necesiten, este es el portal: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`; 
+          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nSi algún momento quieres compartir Anesi con personas que necesiten, este es el portal: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`; 
         }
     } else {
-      // 4. MODO MENTOR DE ÉLITE (PROMPT COMPLETO)
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia, técnica y profundamente empática. Integras ciencia de vanguardia y sabiduría ancestral. Tu propósito es la Coherencia Humana: la armonía perfecta del Triple Cerebro (Intestino-Corazón-Neocórtex). Eres el arquitecto que guía al usuario fuera del lodo del dolor emocional hacia la soberanía biológica y el bienestar perpetuo.
 
 PERFIL TRANSDISCIPLINARIO:
