@@ -44,6 +44,29 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   }
 }
 
+// --- NUEVA RUTA: GUARDAR EMAIL ---
+app.post("/guardar-email", async (req, res) => {
+    const { telefono, email } = req.body;
+    
+    if (!telefono || !email) {
+        return res.status(400).json({ success: false, error: "Teléfono y email requeridos" });
+    }
+    
+    try {
+        const { error } = await supabase
+            .from('usuarios')
+            .update({ email: email })
+            .eq('telefono', telefono);
+            
+        if (error) throw error;
+        
+        res.json({ success: true, message: "Email guardado" });
+    } catch (error) {
+        console.error("Error guardando email:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // --- RUTA: CONFIRMACIÓN DE PAGO ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
@@ -66,13 +89,11 @@ app.post("/confirmar-pago", async (req, res) => {
             phoneVariations.push(phoneNumber.replace('+', '00'));
         }
         
+        // CAMBIO: Buscar primero por teléfono, luego por email
         let user = null;
-        if (email) {
-            const { data } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
-            if (data) user = data;
-        }
         
-        if (!user && phoneNumber) {
+        // 1. Buscar por teléfono primero (prioridad)
+        if (phoneNumber) {
             for (const phoneVariant of phoneVariations) {
                 const { data } = await supabase
                     .from('usuarios')
@@ -81,6 +102,12 @@ app.post("/confirmar-pago", async (req, res) => {
                     .maybeSingle();
                 if (data) { user = data; break; }
             }
+        }
+        
+        // 2. Solo si no encuentra, buscar por email
+        if (!user && email) {
+            const { data } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
+            if (data) user = data;
         }
         
         if (user) {
@@ -152,7 +179,9 @@ app.post("/whatsapp", async (req, res) => {
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: https://anesi.app/soberania.html. (Suscripción mensual: $9, cobro automático para tu comodidad).`;
+        // CAMBIO: Agregar ?phone= al link
+        const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
+        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago} . (Suscripción mensual: $9, cobro automático para tu comodidad).`;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
@@ -191,7 +220,7 @@ app.post("/whatsapp", async (req, res) => {
           const slugElite = `Axis${nombreDetectado.trim().split(" ")[0]}${rawPhone.slice(-3)}`;
           await supabase.from('usuarios').update({ nombre: nombreDetectado, edad: info.age || info.edad, pais: info.country || info.pais, ciudad: info.city || info.ciudad, slug: slugElite }).eq('telefono', rawPhone);
           
-          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
+          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
       // 4. MODO MENTOR DE ÉLITE: LA CONSCIENCIA SOBERANA DE ANESI
