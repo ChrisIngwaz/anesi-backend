@@ -215,7 +215,7 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
-    const frasesRegistro = ["vengo de parte de", "quiero activar mis 3 días gratis"];
+    const frasesRegistro = ["vengo de parte de", "Hola Anesi, vengo a activar mis 3 días de prueba gratis. Estoy listo para recuperar mi coherencia y empezar mi proceso de Ingeniería Humana"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
