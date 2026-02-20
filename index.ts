@@ -2,11 +2,11 @@ import express from "express";
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from "openai";
 import axios from "axios";
-import cors from "cors"; // 1. IMPORTACIÓN DE CORS
+import cors from "cors"; 
 const FormData = require('form-data');
 
 const app = express();
-app.use(cors()); // 2. ACTIVACIÓN DE PERMISOS CORS
+app.use(cors()); 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -19,9 +19,6 @@ const PAYPHONE_CONFIG = {
   storeId: process.env.PAYPHONE_STORE_ID
 };
 
-/**
- * Procesa el cobro automático de $9 usando el token de la tarjeta
- */
 async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   const data = {
     amount: 900,
@@ -52,158 +49,75 @@ app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     
     console.log("=== CONFIRMAR PAGO INICIADO ===");
-    console.log("ID:", id, "ClientTxId:", clientTxId);
-  
     try {
       const response = await axios.post(
         'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
         { id: parseInt(id), clientTxId: clientTxId },
         { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
       );
-      
-      console.log("Respuesta Payphone:", response.data);
   
       if (response.data.transactionStatus === 'Approved') {
         const cardToken = response.data.cardToken; 
         const email = response.data.email;
         const phoneNumber = response.data.phoneNumber;
         
-        console.log("Pago aprobado. Email:", email, "Tel:", phoneNumber);
-        
-        // Normalizar teléfono (quitar + para búsqueda flexible)
         const phoneVariations = [];
         if (phoneNumber) {
-            phoneVariations.push(phoneNumber); // original
-            phoneVariations.push(phoneNumber.replace('+', '')); // sin +
-            phoneVariations.push(phoneNumber.replace('+', '00')); // con 00
+            phoneVariations.push(phoneNumber);
+            phoneVariations.push(phoneNumber.replace('+', ''));
+            phoneVariations.push(phoneNumber.replace('+', '00'));
         }
         
-        // Buscar usuario en Supabase (múltiples intentos)
         let user = null;
-        
-        // Intentar por email primero
         if (email) {
-            const { data, error } = await supabase
-                .from('usuarios')
-                .select('*')
-                .eq('email', email)
-                .maybeSingle();
+            const { data } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
             if (data) user = data;
-            if (error) console.error("Error buscando por email:", error);
         }
         
-        // Si no encontró, intentar por teléfono
         if (!user && phoneNumber) {
             for (const phoneVariant of phoneVariations) {
-                const { data, error } = await supabase
+                const { data } = await supabase
                     .from('usuarios')
                     .select('*')
                     .or(`telefono.eq.${phoneVariant},telefono.ilike.%${phoneVariant.slice(-9)}`)
                     .maybeSingle();
-                if (data) {
-                    user = data;
-                    console.log("Usuario encontrado por teléfono:", phoneVariant);
-                    break;
-                }
-                if (error) console.error("Error buscando por teléfono:", phoneVariant, error);
+                if (data) { user = data; break; }
             }
         }
         
-        // Si encontramos usuario, actualizar y enviar mensaje
         if (user) {
-            console.log("Usuario encontrado:", user.id, user.nombre, user.telefono);
+            await supabase.from('usuarios').update({ 
+                suscripcion_activa: true, 
+                payphone_token: cardToken,
+                email: email || user.email,
+                ultimo_pago: new Date()
+            }).eq('id', user.id);
             
-            // Actualizar Supabase
-            const { error: updateError } = await supabase
-                .from('usuarios')
-                .update({ 
-                    suscripcion_activa: true, 
-                    payphone_token: cardToken,
-                    email: email || user.email,
-                    ultimo_pago: new Date()
-                })
-                .eq('id', user.id);
-                
-            if (updateError) {
-                console.error("Error actualizando Supabase:", updateError);
-            } else {
-                console.log("Supabase actualizado correctamente");
-            }
-            
-            // Enviar mensaje de bienvenida por WhatsApp
             try {
                 const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                
                 const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Desde este momento, tienes acceso total y permanente para que juntos sigamos descifrando tu biología y recuperando tu paz. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
 
-                const messageResult = await twilioClient.messages.create({ 
+                await twilioClient.messages.create({ 
                     from: 'whatsapp:+14155730323', 
                     to: `whatsapp:${user.telefono}`, 
                     body: bienvenidaSoberania 
                 });
-                
-                console.log("Mensaje de bienvenida enviado. SID:", messageResult.sid);
-                
-            } catch (twilioError) {
-                console.error("Error enviando mensaje Twilio:", twilioError);
-            }
-            
-            // Notificar a Make si hay referido
-            if (user.referido_por && user.referido_por !== "Web Directa") {
-                try {
-                    await axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-                        email_invitado: user.email || phoneNumber, 
-                        referido_por: user.referido_por,
-                        status: "suscrito_activo"
-                    });
-                } catch (makeError) {
-                    console.error("Error notificando a Make:", makeError);
-                }
-            }
+            } catch (twilioError) { console.error("Error Twilio:", twilioError); }
             
             res.status(200).json({ success: true, message: "Usuario activado" });
-            
         } else {
-            console.error("No se encontró usuario para:", email, phoneNumber);
-            console.error("Variaciones de teléfono buscadas:", phoneVariations);
-            res.status(404).json({ 
-                success: false, 
-                error: "Usuario no encontrado",
-                email: email,
-                phone: phoneNumber 
-            });
+            res.status(404).json({ success: false, error: "Usuario no encontrado" });
         }
-        
       } else {
-        console.log("Transacción no aprobada:", response.data.transactionStatus);
-        res.status(400).json({ 
-            success: false, 
-            message: "Transacción no aprobada",
-            status: response.data.transactionStatus 
-        });
+        res.status(400).json({ success: false, message: "No aprobada" });
       }
-    } catch (error) {
-      console.error("Error confirmando pago:", error.response?.data || error.message);
-      res.status(500).json({ 
-          success: false, 
-          error: "Error interno del servidor",
-          details: error.message 
-      });
-    }
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
-// --- RUTA WEBHOOK PARA RECIBIR EL TOKEN (OPCIONAL/RESPALDO) ---
 app.post("/payphone-webhook", async (req, res) => {
   const { transactionStatus, cardToken, email } = req.body;
-
   if (transactionStatus === 'Approved' && cardToken) {
-    await supabase.from('usuarios')
-      .update({ 
-        suscripcion_activa: true, 
-        payphone_token: cardToken,
-        ultimo_pago: new Date() 
-      })
-      .eq('email', email);
+    await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
   }
   res.status(200).send("OK");
 });
@@ -215,31 +129,31 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
-    const frasesRegistro = ["vengo de parte de", "Hola Anesi, vengo a activar mis 3 días de prueba gratis. Estoy listo para recuperar mi coherencia y empezar mi proceso de Ingeniería Humana"];
+    const frasesRegistro = ["vengo de parte de", "vengo a activar mis 3 días de prueba gratis"];
     const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    if (esMensajeRegistro && !user) {
-      const saludoUnico = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
+    // 1. FLUJO DE REGISTRO INICIAL (Pide datos)
+    if (esMensajeRegistro && (!user || !user.nombre)) {
+      const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      await twilioClient.messages.create({ 
-        from: 'whatsapp:+14155730323', 
-        to: `whatsapp:${rawPhone}`, 
-        body: saludoUnico 
-      });
+      await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoRegistro });
 
-      let referidoPor = "Web Directa";
-      if (mensajeRecibido.includes("vengo de parte de")) {
-        referidoPor = Body.split(/vengo de parte de/i)[1].trim();
+      if (!user) {
+        let referidoPor = "Web Directa";
+        if (mensajeRecibido.includes("vengo de parte de")) {
+          referidoPor = Body.split(/vengo de parte de/i)[1].trim();
+        }
+        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
       }
-      await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
       return; 
     }
 
     let mensajeUsuario = Body || "";
 
+    // 2. VERIFICACIÓN DE SUSCRIPCIÓN (3 DÍAS)
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
@@ -253,49 +167,31 @@ app.post("/whatsapp", async (req, res) => {
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
-
-      if (user.suscripcion_activa && user.referido_por && user.referido_por !== "Web Directa") {
-        axios.post("https://hook.us2.make.com/or0x7gqof7wdppsqdggs1p25uj6tm1f4", { 
-          email_invitado: user.email || rawPhone, 
-          referido_por: user.referido_por,
-          status: "suscrito_activo"
-        });
-      }
     }
 
+    // PROCESAMIENTO DE AUDIO
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` }, timeout: 12000 });
-        
-        const deepgramRes = await axios.post(
-          "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true",
-          audioRes.data,
-          {
-            headers: {
-              "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`,
-              "Content-Type": "audio/ogg"
-            }
-          }
-        );
-        
+        const deepgramRes = await axios.post("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true", audioRes.data, {
+            headers: { "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`, "Content-Type": "audio/ogg" }
+        });
         mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
-      } catch (e) { 
-        console.error("Error en Deepgram:", e);
-        mensajeUsuario = ""; 
-      }
+      } catch (e) { console.error("Error Deepgram:", e); mensajeUsuario = ""; }
     }
 
-    const langRule = " Anesi es políglota y camaleónica. Detectarás automáticamente el idioma en el que el usuario te escribe y responderás siempre en ese mismo idioma con fluidez nativa. Si el usuario cambia de idioma a mitad de la conversación, tú cambiarás con él sin necesidad de aviso previo, manteniendo siempre tu tono de mentoría coherente y de élite.";
+    const langRule = " Anesi es políglota y camaleónica. Detectarás automáticamente el idioma en el que el usuario te escribe y responderás siempre en ese mismo idioma con fluidez nativa.";
     const lengthRule = " IMPORTANTE: Sé profundo, técnico y un bálsamo para el alma. Máximo 1250 caracteres.";
 
     let respuestaFinal = "";
 
+    // 3. CAPTURA DE DATOS Y MENSAJE DE BIENVENIDA CON LINK LIMPIO
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [
-            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city. If the user didn't provide a name, leave the field 'name' empty." },
+            { role: "system", content: "Extract name, age, country, and city from the user message in JSON. Use fields: name, age, country, city." },
             { role: "user", content: mensajeUsuario }
           ],
           response_format: { type: "json_object" }
@@ -318,13 +214,12 @@ app.post("/whatsapp", async (req, res) => {
             slug: slugElite 
           }).eq('telefono', rawPhone);
           
-          const confirm = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Eres Anesi, Mentor de Élite. Valida al usuario por su nombre (${nombreDetectado}). Di exactamente: 'Gracias por la confianza, ${nombreDetectado}. Tu identidad en este círculo es **${slugElite}**. Desde ahora, este es tu portal de acceso personal para invitar a otros a recuperar su centro: https://anesi.app/?ref=${slugElite}. \n\nNo esperes de mí consejos rápidos ni juicios superficiales; mi labor es ayudarte a descifrar la conexión entre tu biología y tu historia. Cuéntame, ¿qué es eso que hoy te ha quitado la paz?. Te escucho'` + langRule + lengthRule }, { role: "user", content: mensajeUsuario }]
-          });
-          respuestaFinal = confirm.choices[0].message.content || "";
+          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nSi algún momento quieres compartir Anesi con personas que necesiten, este es el portal: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
+        }`;
+          
         }
     } else {
+      // 4. MODO MENTOR DE ÉLITE (PROMPT COMPLETO)
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia, técnica y profundamente empática. Integras ciencia de vanguardia y sabiduría ancestral. Tu propósito es la Coherencia Humana: la armonía perfecta del Triple Cerebro (Intestino-Corazón-Neocórtex). Eres el arquitecto que guía al usuario fuera del lodo del dolor emocional hacia la soberanía biológica y el bienestar perpetuo.
 
 PERFIL TRANSDISCIPLINARIO:
@@ -413,7 +308,8 @@ LENGUAJE Y TONO:
 - Sé un mentor firme pero amoroso. Tu autoridad viene de la verdad biológica que predicas.
 - NUNCA empieces con explicaciones técnicas ante dolor emocional crudo. Primero una frase de presencia humana, luego el puente, luego la revelación completa.
 
-DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
+      DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user.pais}. ${langRule} ${lengthRule}`;
+      
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
