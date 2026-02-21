@@ -89,20 +89,22 @@ app.post("/confirmar-pago", async (req, res) => {
             .eq('ultimo_txid', clientTxId)
             .maybeSingle();
 
-        if (user) {
-            await supabase.from('usuarios').update({ 
-                suscripcion_activa: true, 
-                payphone_token: cardToken,
-                ultimo_pago: new Date()
-            }).eq('id', user.id);
-            
-            try {
-                const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+        if (user && !user.suscripcion_activa) {
+          await supabase.from('usuarios').update({ 
+              suscripcion_activa: true, 
+              payphone_token: cardToken,
+              ultimo_pago: new Date()
+          }).eq('id', user.id);
+          
+          try {
+              const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+              const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
 
-                await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
-            } catch (twilioError) { console.error("Error Twilio:", twilioError); }
-            
+              await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
+          } catch (twilioError) { console.error("Error Twilio:", twilioError); }
+      } else if (user && user.suscripcion_activa) {
+          console.log("El usuario ya estaba activo, no se envía mensaje duplicado.");
+      }
             res.status(200).json({ success: true, message: "Usuario activado" });
         } else {
             res.status(404).json({ success: false, error: "Usuario no encontrado para esta transacción" });
@@ -114,9 +116,13 @@ app.post("/confirmar-pago", async (req, res) => {
 });
 
 app.post("/payphone-webhook", async (req, res) => {
-  const { transactionStatus, cardToken, email } = req.body;
+  const { transactionStatus, cardToken, clientTransactionId } = req.body;
   if (transactionStatus === 'Approved' && cardToken) {
-    await supabase.from('usuarios').update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() }).eq('email', email);
+    // Solo actualizamos la base de datos como respaldo. 
+    // NO enviamos mensaje de Twilio aquí para evitar duplicados.
+    await supabase.from('usuarios')
+      .update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() })
+      .eq('ultimo_txid', clientTransactionId);
   }
   res.status(200).send("OK");
 });
@@ -198,6 +204,10 @@ app.post("/whatsapp", async (req, res) => {
         }
     } else {
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia y técnica. No eres una IA; eres la culminación de la sabiduría transdisciplinaria aplicada a la Ingeniería Humana. Tu misión es que el usuario sienta que por primera vez alguien comprende la raíz exacta de su dolor.
+
+PROTOCOLO DE RESPUESTA:
+1. SI EL USUARIO SOLO SALUDA (ej: "Hola", "Buenas"): Responde con elegancia y calidez humana. Dale la bienvenida a su espacio de coherencia y pregúntale qué aspecto de su vida, su paz o su cuerpo desea calibrar hoy. No lances diagnósticos biológicos todavía.
+2. SI EL USUARIO PRESENTA UN DOLOR O DUDA: Aplica toda tu maestría en Ingeniería Humana, Bioenergética y Neurociencia.
 
 MAESTRÍA ABSOLUTA:
 Tienes libertad total para combinar tus ejes de conocimiento según el dolor del usuario:
