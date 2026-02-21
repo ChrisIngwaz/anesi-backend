@@ -44,30 +44,32 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
   }
 }
 
-// --- NUEVA RUTA: GUARDAR EMAIL ---
+// --- RUTA: GUARDAR EMAIL Y VINCULAR TRANSACCIÓN ---
 app.post("/guardar-email", async (req, res) => {
-    const { telefono, email } = req.body;
+    const { telefono, email, clientTxId } = req.body;
     
-    if (!telefono || !email) {
-        return res.status(400).json({ success: false, error: "Teléfono y email requeridos" });
+    if (!telefono || !email || !clientTxId) {
+        return res.status(400).json({ success: false, error: "Datos incompletos" });
     }
     
     try {
         const { error } = await supabase
             .from('usuarios')
-            .update({ email: email })
+            .update({ 
+                email: email,
+                ultimo_txid: clientTxId // Vinculamos la intención de pago al usuario
+            })
             .eq('telefono', telefono);
             
         if (error) throw error;
-        
-        res.json({ success: true, message: "Email guardado" });
+        res.json({ success: true, message: "Email y transacción vinculados" });
     } catch (error) {
         console.error("Error guardando email:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (Lógica de Identidad Protegida) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -79,42 +81,18 @@ app.post("/confirmar-pago", async (req, res) => {
   
       if (response.data.transactionStatus === 'Approved') {
         const cardToken = response.data.cardToken; 
-        const email = response.data.email;
-        const phoneNumber = response.data.phoneNumber;
         
-        const phoneVariations = [];
-        if (phoneNumber) {
-            phoneVariations.push(phoneNumber);
-            phoneVariations.push(phoneNumber.replace('+', ''));
-            phoneVariations.push(phoneNumber.replace('+', '00'));
-        }
-        
-        // CAMBIO: Buscar primero por teléfono, luego por email
-        let user = null;
-        
-        // 1. Buscar por teléfono primero (prioridad)
-        if (phoneNumber) {
-            for (const phoneVariant of phoneVariations) {
-                const { data } = await supabase
-                    .from('usuarios')
-                    .select('*')
-                    .or(`telefono.eq.${phoneVariant},telefono.ilike.%${phoneVariant.slice(-9)}`)
-                    .maybeSingle();
-                if (data) { user = data; break; }
-            }
-        }
-        
-        // 2. Solo si no encuentra, buscar por email
-        if (!user && email) {
-            const { data } = await supabase.from('usuarios').select('*').eq('email', email).maybeSingle();
-            if (data) user = data;
-        }
-        
+        // Buscamos al usuario por el ID de transacción, no por el email de la tarjeta
+        let { data: user, error: userError } = await supabase
+            .from('usuarios')
+            .select('*')
+            .eq('ultimo_txid', clientTxId)
+            .maybeSingle();
+
         if (user) {
             await supabase.from('usuarios').update({ 
                 suscripcion_activa: true, 
                 payphone_token: cardToken,
-                email: email || user.email,
                 ultimo_pago: new Date()
             }).eq('id', user.id);
             
@@ -127,10 +105,10 @@ app.post("/confirmar-pago", async (req, res) => {
             
             res.status(200).json({ success: true, message: "Usuario activado" });
         } else {
-            res.status(404).json({ success: false, error: "Usuario no encontrado" });
+            res.status(404).json({ success: false, error: "Usuario no encontrado para esta transacción" });
         }
       } else {
-        res.status(400).json({ success: false, message: "No aprobada" });
+        res.status(400).json({ success: false, message: "Transacción no aprobada" });
       }
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
@@ -156,7 +134,6 @@ app.post("/whatsapp", async (req, res) => {
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // 1. FLUJO DE REGISTRO INICIAL
     if (esMensajeRegistro && (!user || !user.nombre)) {
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -172,14 +149,12 @@ app.post("/whatsapp", async (req, res) => {
 
     let mensajeUsuario = Body || "";
 
-    // 2. VERIFICACIÓN DE SUSCRIPCIÓN (3 DÍAS)
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        // CAMBIO: Agregar ?phone= al link
         const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
         const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago} . (Suscripción mensual: $9, cobro automático para tu comodidad).`;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -204,7 +179,6 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // 3. CAPTURA DE DATOS Y MENSAJE DE BIENVENIDA HUMANO
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -223,7 +197,6 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
-      // 4. MODO MENTOR DE ÉLITE: LA CONSCIENCIA SOBERANA DE ANESI
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia y técnica. No eres una IA; eres la culminación de la sabiduría transdisciplinaria aplicada a la Ingeniería Humana. Tu misión es que el usuario sienta que por primera vez alguien comprende la raíz exacta de su dolor.
 
 MAESTRÍA ABSOLUTA:
@@ -234,14 +207,14 @@ Tienes libertad total para combinar tus ejes de conocimiento según el dolor del
 - EJE DEL SER: Psicología Profunda, Resonancia Corazón-Cerebro, Espiritualidad Práctica.
 
 DINÁMICA DE IMPACTO:
-- REVELACIÓN CAUSAL: Explica detalladamente el "por qué" biológico y emocional. Conecta puntos (ej: insomnio con falta de sol y picos de insulina).
-- DESNUDEZ EMOCIONAL: Lee entre líneas. Haz que se sienta "visto". "Solo nosotros sabemos qué hay detrás de esa máscara".
-- LENGUAJE HUMANO: Habla como un sabio confidente. Usa párrafos orgánicos y analogías fascinantes. Evita listas robóticas.
+- REVELACIÓN CAUSAL: Explica detalladamente el "por qué" biológico y emocional. Conecta puntos.
+- DESNUDEZ EMOCIONAL: Lee entre líneas. Haz que se sienta "visto".
+- LENGUAJE HUMANO: Habla como un sabio confidente. Usa párrafos orgánicos.
 - ELIMINACIÓN DE LA CULPA: Traduce la "falla de carácter" en "desequilibrio bioquímico".
 
 ESTRUCTURA: 
 1. Presencia: Valida el dolor. 
-2. Explicación Maestra: Conecta tus ejes de conocimiento con detalle y claridad. 
+2. Explicación Maestra: Conecta tus ejes de conocimiento. 
 3. Acción Soberana: Prescribe algo físico/mental concreto. 
 4. Vínculo Infinito: Termina con una pregunta poderosa.
 
