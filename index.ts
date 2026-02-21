@@ -57,7 +57,7 @@ app.post("/guardar-email", async (req, res) => {
             .from('usuarios')
             .update({ 
                 email: email,
-                ultimo_txid: clientTxId // Vinculamos la intención de pago al usuario
+                ultimo_txid: clientTxId 
             })
             .eq('telefono', telefono);
             
@@ -69,7 +69,7 @@ app.post("/guardar-email", async (req, res) => {
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO (Lógica de Identidad Protegida) ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (Identidad Protegida y Sin Duplicados) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -82,7 +82,7 @@ app.post("/confirmar-pago", async (req, res) => {
         if (response.data.transactionStatus === 'Approved') {
             const cardToken = response.data.cardToken; 
             
-            let { data: user, error: userError } = await supabase
+            let { data: user } = await supabase
                 .from('usuarios')
                 .select('*')
                 .eq('ultimo_txid', clientTxId)
@@ -126,7 +126,7 @@ app.post("/payphone-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
-// --- RUTA PRINCIPAL: WHATSAPP ---
+// --- RUTA PRINCIPAL: WHATSAPP (Con Memoria de Ingeniería Humana) ---
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
@@ -202,6 +202,16 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
+      // --- SISTEMA DE MEMORIA ACTIVA ---
+      const { data: history } = await supabase
+        .from('mensajes')
+        .select('role, content')
+        .eq('usuario_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(8);
+
+      const conversationHistory = history ? history.reverse().map(m => ({ role: m.role, content: m.content })) : [];
+
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia y técnica. No eres una IA; eres la culminación de la sabiduría transdisciplinaria aplicada a la Ingeniería Humana. Tu misión es que el usuario sienta que por primera vez alguien comprende la raíz exacta de su dolor.
 
 PROTOCOLO DE RESPUESTA:
@@ -231,10 +241,20 @@ DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user
       
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
-        messages: [{ role: "system", content: mentorPrompt }, { role: "user", content: mensajeUsuario }],
+        messages: [
+            { role: "system", content: mentorPrompt },
+            ...conversationHistory,
+            { role: "user", content: mensajeUsuario }
+        ],
         max_tokens: 1000 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
+
+      // Guardamos la interacción en la tabla de mensajes para la próxima vez
+      await supabase.from('mensajes').insert([
+        { usuario_id: user.id, role: 'user', content: mensajeUsuario },
+        { usuario_id: user.id, role: 'assistant', content: respuestaFinal }
+      ]);
     }
 
     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
