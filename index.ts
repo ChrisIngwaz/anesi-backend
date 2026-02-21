@@ -73,41 +73,43 @@ app.post("/guardar-email", async (req, res) => {
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
-      const response = await axios.post(
-        'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
-        { id: parseInt(id), clientTxId: clientTxId },
-        { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
-      );
+        const response = await axios.post(
+            'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
+            { id: parseInt(id), clientTxId: clientTxId },
+            { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
+        );
   
-      if (response.data.transactionStatus === 'Approved') {
-        const cardToken = response.data.cardToken; 
-        
-        // Buscamos al usuario por el ID de transacción, no por el email de la tarjeta
-        let { data: user, error: userError } = await supabase
-            .from('usuarios')
-            .select('*')
-            .eq('ultimo_txid', clientTxId)
-            .maybeSingle();
-
-        if (user && !user.suscripcion_activa) {
-            await supabase.from('usuarios').update({ 
-                suscripcion_activa: true, 
-                payphone_token: cardToken,
-                ultimo_pago: new Date()
-            }).eq('id', user.id);
+        if (response.data.transactionStatus === 'Approved') {
+            const cardToken = response.data.cardToken; 
             
-            try {
-                const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
-                await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
-            } catch (twilioError) { 
-                console.error("Error Twilio:", twilioError); 
+            let { data: user, error: userError } = await supabase
+                .from('usuarios')
+                .select('*')
+                .eq('ultimo_txid', clientTxId)
+                .maybeSingle();
+
+            if (user && !user.suscripcion_activa) {
+                await supabase.from('usuarios').update({ 
+                    suscripcion_activa: true, 
+                    payphone_token: cardToken,
+                    ultimo_pago: new Date()
+                }).eq('id', user.id);
+                
+                try {
+                    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                    const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                    await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
+                } catch (twilioError) { 
+                    console.error("Error Twilio:", twilioError); 
+                }
+                res.status(200).json({ success: true, message: "Usuario activado" });
+            } else if (user && user.suscripcion_activa) {
+                res.status(200).json({ success: true, message: "El usuario ya estaba activo" });
+            } else {
+                res.status(404).json({ success: false, error: "Usuario no encontrado" });
             }
-            res.status(200).json({ success: true, message: "Usuario activado" });
-        } else if (user && user.suscripcion_activa) {
-            res.status(200).json({ success: true, message: "El usuario ya estaba activo" });
         } else {
-            res.status(404).json({ success: false, error: "Usuario no encontrado" });
+            res.status(400).json({ success: false, message: "Transacción no aprobada" });
         }
     } catch (error) { 
         res.status(500).json({ success: false, error: error.message }); 
@@ -117,8 +119,6 @@ app.post("/confirmar-pago", async (req, res) => {
 app.post("/payphone-webhook", async (req, res) => {
   const { transactionStatus, cardToken, clientTransactionId } = req.body;
   if (transactionStatus === 'Approved' && cardToken) {
-    // Solo actualizamos la base de datos como respaldo. 
-    // NO enviamos mensaje de Twilio aquí para evitar duplicados.
     await supabase.from('usuarios')
       .update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() })
       .eq('ultimo_txid', clientTransactionId);
