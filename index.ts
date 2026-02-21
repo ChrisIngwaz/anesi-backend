@@ -90,29 +90,28 @@ app.post("/confirmar-pago", async (req, res) => {
             .maybeSingle();
 
         if (user && !user.suscripcion_activa) {
-          await supabase.from('usuarios').update({ 
-              suscripcion_activa: true, 
-              payphone_token: cardToken,
-              ultimo_pago: new Date()
-          }).eq('id', user.id);
-          
-          try {
-              const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-              const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
-
-              await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
-          } catch (twilioError) { console.error("Error Twilio:", twilioError); }
-      } else if (user && user.suscripcion_activa) {
-          console.log("El usuario ya estaba activo, no se envía mensaje duplicado.");
-      }
+            await supabase.from('usuarios').update({ 
+                suscripcion_activa: true, 
+                payphone_token: cardToken,
+                ultimo_pago: new Date()
+            }).eq('id', user.id);
+            
+            try {
+                const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
+            } catch (twilioError) { 
+                console.error("Error Twilio:", twilioError); 
+            }
             res.status(200).json({ success: true, message: "Usuario activado" });
+        } else if (user && user.suscripcion_activa) {
+            res.status(200).json({ success: true, message: "El usuario ya estaba activo" });
         } else {
-            res.status(404).json({ success: false, error: "Usuario no encontrado para esta transacción" });
+            res.status(404).json({ success: false, error: "Usuario no encontrado" });
         }
-      } else {
-        res.status(400).json({ success: false, message: "Transacción no aprobada" });
-      }
-    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+    } catch (error) { 
+        res.status(500).json({ success: false, error: error.message }); 
+    }
 });
 
 app.post("/payphone-webhook", async (req, res) => {
