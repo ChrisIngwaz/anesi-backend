@@ -139,16 +139,31 @@ app.post("/whatsapp", async (req, res) => {
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
+    // --- CAMBIO 1: REGISTRO BLINDADO ---
     if (esMensajeRegistro && (!user || !user.nombre)) {
+      let referidoPor = "Web Directa";
+      if (mensajeRecibido.includes("vengo de parte de")) {
+        referidoPor = Body.split(/vengo de parte de/i)[1].trim();
+      }
+
+      const { error: upsertError } = await supabase.from('usuarios').upsert(
+        { 
+          telefono: rawPhone, 
+          fase: 'beta', 
+          referido_por: referidoPor,
+          nombre: "User" 
+        },
+        { onConflict: 'telefono' }
+      );
+
+      if (upsertError) {
+        console.error("Error crítico al registrar usuario:", upsertError);
+        return; 
+      }
+
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoRegistro });
-
-      if (!user) {
-        let referidoPor = "Web Directa";
-        if (mensajeRecibido.includes("vengo de parte de")) referidoPor = Body.split(/vengo de parte de/i)[1].trim();
-        await supabase.from('usuarios').insert([{ telefono: rawPhone, fase: 'beta', referido_por: referidoPor }]);
-      }
       return; 
     }
 
@@ -184,20 +199,30 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
+    // --- CAMBIO 2: EXTRACCIÓN Y ACTIVACIÓN DE MODO MENTOR ---
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "system", content: "Extract name, age, country, and city in JSON." }, { role: "user", content: mensajeUsuario }],
+          messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. If not found, leave fields empty." }, { role: "user", content: mensajeUsuario }],
           response_format: { type: "json_object" }
         });
+        
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreDetectado = info.name || info.nombre;
 
-        if (!nombreDetectado || nombreDetectado.trim() === "" || nombreDetectado.toLowerCase() === "user") {
+        if (!nombreDetectado || nombreDetectado.toLowerCase() === "user" || nombreDetectado.length < 2) {
           respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const slugElite = `Axis${nombreDetectado.trim().split(" ")[0]}${rawPhone.slice(-3)}`;
-          await supabase.from('usuarios').update({ nombre: nombreDetectado, edad: info.age || info.edad, pais: info.country || info.pais, ciudad: info.city || info.ciudad, slug: slugElite }).eq('telefono', rawPhone);
+          
+          await supabase.from('usuarios').upsert({ 
+              telefono: rawPhone, 
+              nombre: nombreDetectado, 
+              edad: info.age || info.edad, 
+              pais: info.country || info.pais, 
+              ciudad: info.city || info.ciudad, 
+              slug: slugElite 
+          }, { onConflict: 'telefono' });
           
           respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
@@ -258,7 +283,6 @@ DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
 
-      // Guardamos la interacción en la tabla de mensajes para la próxima vez
       await supabase.from('mensajes').insert([
         { usuario_id: user.id, role: 'user', content: mensajeUsuario },
         { usuario_id: user.id, role: 'assistant', content: respuestaFinal }
