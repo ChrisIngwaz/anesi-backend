@@ -69,7 +69,7 @@ app.post("/guardar-email", async (req, res) => {
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO (Identidad Protegida y Sin Duplicados) ---
+// --- RUTA: CONFIRMACIÓN DE PAGO ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -134,13 +134,15 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
-    const frasesRegistro = ["vengo de parte de", "vengo a activar mis 3 días de prueba gratis"];
-    const esMensajeRegistro = frasesRegistro.some(frase => mensajeRecibido.includes(frase));
+    
+    // LLAVE MAESTRA MULTILINGÜE PARA EL REGISTRO
+    const palabrasClaveRegistro = ["vengo", "activar", "prueba", "gratis", "activate", "trial", "free", "ativar", "prova"];
+    const esMensajeRegistro = palabrasClaveRegistro.some(palabra => mensajeRecibido.includes(palabra));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // --- CAMBIO 1: REGISTRO BLINDADO ---
-    if (esMensajeRegistro && (!user || !user.nombre)) {
+    // REGISTRO BLINDADO CON UPSERT
+    if (esMensajeRegistro && (!user || !user.nombre || user.nombre === "User")) {
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
@@ -199,7 +201,7 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // --- CAMBIO 2: EXTRACCIÓN Y ACTIVACIÓN DE MODO MENTOR ---
+    // EXTRACCIÓN Y ACTIVACIÓN DE MODO MENTOR
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
