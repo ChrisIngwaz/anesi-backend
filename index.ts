@@ -69,7 +69,7 @@ app.post("/guardar-email", async (req, res) => {
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (ACTUALIZADA PARA PLAN ANUAL) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -81,6 +81,7 @@ app.post("/confirmar-pago", async (req, res) => {
   
         if (response.data.transactionStatus === 'Approved') {
             const cardToken = response.data.cardToken; 
+            const montoCents = response.data.amount; // Monto en centavos
             
             let { data: user } = await supabase
                 .from('usuarios')
@@ -88,23 +89,30 @@ app.post("/confirmar-pago", async (req, res) => {
                 .eq('ultimo_txid', clientTxId)
                 .maybeSingle();
 
-            if (user && !user.suscripcion_activa) {
+            if (user) {
+                // Lógica de días según el monto ($900 cts = $9 | $9000 cts = $90)
+                let diasSumar = montoCents >= 9000 ? 365 : 30;
+                let tipoPlan = montoCents >= 9000 ? 'anual' : 'mensual';
+                
+                const nuevaFechaVencimiento = new Date();
+                nuevaFechaVencimiento.setDate(nuevaFechaVencimiento.getDate() + diasSumar);
+
                 await supabase.from('usuarios').update({ 
                     suscripcion_activa: true, 
                     payphone_token: cardToken,
-                    ultimo_pago: new Date()
+                    ultimo_pago: new Date(),
+                    fecha_vencimiento: nuevaFechaVencimiento,
+                    plan_tipo: tipoPlan
                 }).eq('id', user.id);
                 
                 try {
                     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                    const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                    const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito en el plan ${tipoPlan}. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
                     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
                 } catch (twilioError) { 
                     console.error("Error Twilio:", twilioError); 
                 }
-                res.status(200).json({ success: true, message: "Usuario activado" });
-            } else if (user && user.suscripcion_activa) {
-                res.status(200).json({ success: true, message: "El usuario ya estaba activo" });
+                res.status(200).json({ success: true, message: `Usuario activado en plan ${tipoPlan}` });
             } else {
                 res.status(404).json({ success: false, error: "Usuario no encontrado" });
             }
@@ -117,10 +125,22 @@ app.post("/confirmar-pago", async (req, res) => {
 });
 
 app.post("/payphone-webhook", async (req, res) => {
-  const { transactionStatus, cardToken, clientTransactionId } = req.body;
+  const { transactionStatus, cardToken, clientTransactionId, amount } = req.body;
   if (transactionStatus === 'Approved' && cardToken) {
+    let diasSumar = amount >= 9000 ? 365 : 30;
+    let tipoPlan = amount >= 9000 ? 'anual' : 'mensual';
+    
+    const nuevaFechaVencimiento = new Date();
+    nuevaFechaVencimiento.setDate(nuevaFechaVencimiento.getDate() + diasSumar);
+
     await supabase.from('usuarios')
-      .update({ suscripcion_activa: true, payphone_token: cardToken, ultimo_pago: new Date() })
+      .update({ 
+          suscripcion_activa: true, 
+          payphone_token: cardToken, 
+          ultimo_pago: new Date(),
+          fecha_vencimiento: nuevaFechaVencimiento,
+          plan_tipo: tipoPlan
+      })
       .eq('ultimo_txid', clientTransactionId);
   }
   res.status(200).send("OK");
@@ -178,7 +198,7 @@ app.post("/whatsapp", async (req, res) => {
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
         const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
-        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad, **sigilo y privacidad**, es momento de activar tu acceso permanente aquí: ${linkPago} . (Suscripción mensual: $9, cobro automático para tu comodidad).`;
+        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad y privacidad, es momento de activar tu acceso permanente aquí: ${linkPago} . (Opción mensual: $9 | Opción anual con 2 meses de regalo: $90).`;
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
