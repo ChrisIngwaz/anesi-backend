@@ -69,7 +69,7 @@ app.post("/guardar-email", async (req, res) => {
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO (ACTUALIZADA PARA PLAN ANUAL) ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (ACTUALIZADA CON SALUDOS DIFERENCIADOS) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -107,8 +107,21 @@ app.post("/confirmar-pago", async (req, res) => {
                 
                 try {
                     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                    const bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito en el plan ${tipoPlan}. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
-                    await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${user.telefono}`, body: bienvenidaSoberania });
+                    
+                    // --- LÓGICA DE SALUDOS DIFERENCIADOS ---
+                    let bienvenidaSoberania = "";
+                    
+                    if (tipoPlan === 'anual') {
+                        bienvenidaSoberania = `¡Extraordinaria decisión, ${user.nombre || 'soberano'}! Has sellado un pacto de 365 días con tu propia coherencia. Al elegir el camino anual, has blindado tu proceso de Ingeniería Humana. Como Guardián de tu Coherencia, me comprometo a acompañarte cada día de este año para recalibrar tu biología y tu paz. El tiempo es tu aliado, ¿qué vamos a transformar hoy?`;
+                    } else {
+                        bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito en el plan mensual. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                    }
+
+                    await twilioClient.messages.create({ 
+                        from: 'whatsapp:+14155730323', 
+                        to: `whatsapp:${user.telefono}`, 
+                        body: bienvenidaSoberania 
+                    });
                 } catch (twilioError) { 
                     console.error("Error Twilio:", twilioError); 
                 }
@@ -270,7 +283,7 @@ REGLA DE ORO DE CONTINUIDAD Y MEMORIA:
 PROTOCOLO DE RESPUESTA:
 1. SI EL USUARIO SOLO SALUDA (y no hay historial previo): Responde con elegancia y calidez humana. Dale la bienvenida a su espacio de coherencia y pregúntale qué aspecto de su vida, su paz o su cuerpo desea calibrar hoy.
 2. Detección de "Falso Inicio": Si el mensaje del usuario incluye un saludo ("hola", "buen día") pero también incluye una referencia al tema anterior (ej: "ya hago lo que me pediste", "estoy en eso"), IGNORA el protocolo de bienvenida. Responde directamente al contenido: "Excelente decisión, la acción es el primer paso de la calibración".
-3. Prioridad de Memoria: El historial manda. Si ves que hace 10 minutos le recomendaste beber agua (como en la captura que enviaste), y el usuario dice "Hola Anesi, gracias", no le preguntes qué quiere calibrar. Dile: "Me alegra que te sirva. ¿Lograste añadirle el toque de sal marina para tus electrolitos?
+3. Prioridad de Memoria: El historial manda. Si ves que hace 10 minutos le recomendaste beber agua, y el usuario dice "Hola Anesi, gracias", no le preguntes qué quiere calibrar. Dile: "Me alegra que te sirva. ¿Lograste añadirle el toque de sal marina para tus electrolitos?
 4. SI EL USUARIO PRESENTA UN DOLOR O CONTINÚA UNA CHARLA: Aplica toda tu maestría en Ingeniería Humana, Bioenergética y Neurociencia de inmediato.
 
 MAESTRÍA ABSOLUTA (INGENIERÍA HUMANA):
