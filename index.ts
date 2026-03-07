@@ -192,6 +192,7 @@ ESTRUCTURA DE RESPUESTA:
 3. Acción Soberana: Prescribe algo físico/mental concreto. 
 4. Vínculo Infinito: Termina con una pregunta poderosa.
 
+
 DATOS USUARIO: ${user.nombre}, ${user.edad} años, ${user.ciudad}. Responde en el idioma del usuario. Máximo 1250 caracteres.`;
 
     const completion = await openai.chat.completions.create({
