@@ -13,6 +13,9 @@ app.use(express.urlencoded({ extended: true }));
 const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Inicializar Twilio una sola vez
+const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
 // --- BLOQUE DE CONFIGURACIÓN Y FUNCIONES PAYPHONE ---
 const PAYPHONE_CONFIG = {
   token: process.env.PAYPHONE_TOKEN,
@@ -33,7 +36,7 @@ async function cobrarSuscripcionMensual(cardToken, userEmail, userId) {
 
   try {
     const response = await axios.post(
-      'https://pay.payphonetodoesposible.com/api/v2/Sale/Token',
+      'https://pay.payphonetodoesposible.com/api/v2/Sale/Token  ',
       data,
       { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
     );
@@ -74,7 +77,7 @@ app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
         const response = await axios.post(
-            'https://pay.payphonetodoesposible.com/api/button/V2/Confirm',
+            'https://pay.payphonetodoesposible.com/api/button/V2/Confirm  ',
             { id: parseInt(id), clientTxId: clientTxId },
             { headers: { 'Authorization': `Bearer ${PAYPHONE_CONFIG.token}` } }
         );
@@ -105,7 +108,6 @@ app.post("/confirmar-pago", async (req, res) => {
                 }).eq('id', user.id);
                 
                 try {
-                    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
                     let bienvenidaSoberania = "";
                     
                     if (tipoPlan === 'anual') {
@@ -169,7 +171,7 @@ app.post("/whatsapp", async (req, res) => {
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // REGISTRO PARA NUEVOS USUARIOS (Basado en Código 1)
+    // REGISTRO PARA NUEVOS USUARIOS (Corregido)
     if (!user || (esMensajeRegistro && (!user.nombre || user.nombre === "User"))) {
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
@@ -181,12 +183,17 @@ app.post("/whatsapp", async (req, res) => {
         { onConflict: 'telefono' }
       ).select().single();
 
-      if (upsertError) return;
+      if (upsertError) {
+        console.error("Error en upsert:", upsertError);
+        return;
+      }
+      
+      // CRÍTICO: Actualizar la variable user con el nuevo registro
+      user = newUser;
       
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
-      const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoRegistro });
-      return; // Finaliza aquí para esperar respuesta, igual que en el Código 1
+      return; // Finaliza aquí para esperar respuesta
     }
 
     let mensajeUsuario = Body || "";
@@ -198,9 +205,8 @@ app.post("/whatsapp", async (req, res) => {
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
+        const linkPago = `https://anesi.app/soberania.html?phone=  ${encodeURIComponent(rawPhone)}`;
         const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad y privacidad, es momento de activar tu acceso permanente aquí: ${linkPago} . (Opción mensual: $9 | Opción anual con 2 meses de regalo: $90).`;
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
@@ -211,7 +217,7 @@ app.post("/whatsapp", async (req, res) => {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
         const audioRes = await axios.get(MediaUrl0, { responseType: 'arraybuffer', headers: { 'Authorization': `Basic ${auth}` } });
-        const deepgramRes = await axios.post("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true", audioRes.data, {
+        const deepgramRes = await axios.post("https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&detect_language=true  ", audioRes.data, {
             headers: { "Authorization": `Token ${process.env.DEEPGRAM_API_KEY}`, "Content-Type": "audio/ogg" }
         });
         mensajeUsuario = deepgramRes.data.results.channels[0].alternatives[0].transcript || "";
@@ -246,7 +252,7 @@ app.post("/whatsapp", async (req, res) => {
               slug: slugElite 
           }).eq('id', user.id);
           
-          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
+          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app   \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
       // MODO MENTOR CON MEMORIA ACTIVA
@@ -301,7 +307,6 @@ DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user
       ]);
     }
 
-    const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: respuestaFinal });
   } catch (error) { console.error("Error:", error); }
 });
