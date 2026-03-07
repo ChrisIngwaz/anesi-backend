@@ -53,14 +53,13 @@ app.post("/guardar-email", async (req, res) => {
     }
     
     try {
-        const cleanPhone = telefono.replace("whatsapp:", "").replace("+", "");
         const { error } = await supabase
             .from('usuarios')
             .update({ 
                 email: email,
                 ultimo_txid: clientTxId 
             })
-            .eq('telefono', cleanPhone);
+            .eq('telefono', telefono);
             
         if (error) throw error;
         res.json({ success: true, message: "Email y transacción vinculados" });
@@ -70,7 +69,7 @@ app.post("/guardar-email", async (req, res) => {
     }
 });
 
-// --- RUTA: CONFIRMACIÓN DE PAGO ---
+// --- RUTA: CONFIRMACIÓN DE PAGO (ACTUALIZADA CON SALUDOS DIFERENCIADOS) ---
 app.post("/confirmar-pago", async (req, res) => {
     const { id, clientTxId } = req.body;
     try {
@@ -82,7 +81,7 @@ app.post("/confirmar-pago", async (req, res) => {
   
         if (response.data.transactionStatus === 'Approved') {
             const cardToken = response.data.cardToken; 
-            const montoCents = response.data.amount;
+            const montoCents = response.data.amount; // Monto en centavos
             
             let { data: user } = await supabase
                 .from('usuarios')
@@ -91,6 +90,7 @@ app.post("/confirmar-pago", async (req, res) => {
                 .maybeSingle();
 
             if (user) {
+                // Lógica de días según el monto ($900 cts = $9 | $9000 cts = $90)
                 let diasSumar = montoCents >= 9000 ? 365 : 30;
                 let tipoPlan = montoCents >= 9000 ? 'anual' : 'mensual';
                 
@@ -107,6 +107,8 @@ app.post("/confirmar-pago", async (req, res) => {
                 
                 try {
                     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                    
+                    // --- LÓGICA DE SALUDOS DIFERENCIADOS ---
                     let bienvenidaSoberania = "";
                     
                     if (tipoPlan === 'anual') {
@@ -157,29 +159,29 @@ app.post("/payphone-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
-// --- RUTA PRINCIPAL: WHATSAPP ---
+// --- RUTA PRINCIPAL: WHATSAPP (Con Memoria de Ingeniería Humana) ---
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
-  // Normalización de número para evitar duplicados por el "+"
-  const rawPhone = From ? From.replace("whatsapp:", "").replace("+", "") : "";
+  const rawPhone = From ? From.replace("whatsapp:", "") : "";
   res.status(200).send("OK");
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
     
+    // LLAVE MAESTRA MULTILINGÜE PARA EL REGISTRO
     const palabrasClaveRegistro = ["vengo", "activar", "prueba", "gratis", "activate", "trial", "free", "ativar", "prova"];
     const esMensajeRegistro = palabrasClaveRegistro.some(palabra => mensajeRecibido.includes(palabra));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // Lógica de registro para nuevos o eliminados
+    // REGISTRO BLINDADO CON UPSERT (CORRECCIÓN: se asigna el resultado a 'user')
     if (!user || (esMensajeRegistro && (!user.nombre || user.nombre === "User"))) {
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
       }
 
-      const { data: upsertedUser, error: upsertError } = await supabase.from('usuarios').upsert(
+      const { data: newUser, error: upsertError } = await supabase.from('usuarios').upsert(
         { 
           telefono: rawPhone, 
           fase: 'beta', 
@@ -194,7 +196,7 @@ app.post("/whatsapp", async (req, res) => {
         return; 
       }
       
-      user = upsertedUser;
+      user = newUser; // Se actualiza la variable local para que el flujo continúe
 
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -234,6 +236,7 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
+    // EXTRACCIÓN Y ACTIVACIÓN DE MODO MENTOR
     if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -261,6 +264,7 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
+      // --- SISTEMA DE MEMORIA ACTIVA ---
       const { data: history } = await supabase
         .from('mensajes')
         .select('role, content')
