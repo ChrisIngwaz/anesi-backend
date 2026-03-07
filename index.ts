@@ -90,7 +90,6 @@ app.post("/confirmar-pago", async (req, res) => {
                 .maybeSingle();
 
             if (user) {
-                // Lógica de días según el monto ($900 cts = $9 | $9000 cts = $90)
                 let diasSumar = montoCents >= 9000 ? 365 : 30;
                 let tipoPlan = montoCents >= 9000 ? 'anual' : 'mensual';
                 
@@ -107,8 +106,6 @@ app.post("/confirmar-pago", async (req, res) => {
                 
                 try {
                     const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                    
-                    // --- LÓGICA DE SALUDOS DIFERENCIADOS ---
                     let bienvenidaSoberania = "";
                     
                     if (tipoPlan === 'anual') {
@@ -167,14 +164,12 @@ app.post("/whatsapp", async (req, res) => {
 
   try {
     const mensajeRecibido = Body ? Body.toLowerCase() : "";
-    
-    // LLAVE MAESTRA MULTILINGÜE PARA EL REGISTRO
     const palabrasClaveRegistro = ["vengo", "activar", "prueba", "gratis", "activate", "trial", "free", "ativar", "prova"];
     const esMensajeRegistro = palabrasClaveRegistro.some(palabra => mensajeRecibido.includes(palabra));
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // REGISTRO BLINDADO CON UPSERT (CORRECCIÓN: se asigna el resultado a 'user')
+    // REGISTRO PARA NUEVOS USUARIOS (Basado en Código 1)
     if (!user || (esMensajeRegistro && (!user.nombre || user.nombre === "User"))) {
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
@@ -182,30 +177,21 @@ app.post("/whatsapp", async (req, res) => {
       }
 
       const { data: newUser, error: upsertError } = await supabase.from('usuarios').upsert(
-        { 
-          telefono: rawPhone, 
-          fase: 'beta', 
-          referido_por: referidoPor,
-          nombre: "User" 
-        },
+        { telefono: rawPhone, fase: 'beta', referido_por: referidoPor, nombre: "User" },
         { onConflict: 'telefono' }
       ).select().single();
 
-      if (upsertError) {
-        console.error("Error crítico al registrar usuario:", upsertError);
-        return; 
-      }
+      if (upsertError) return;
       
-      user = newUser; // Se actualiza la variable local para que el flujo continúe
-
       const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
       const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoRegistro });
-      return; 
+      return; // Finaliza aquí para esperar respuesta, igual que en el Código 1
     }
 
     let mensajeUsuario = Body || "";
 
+    // CONTROL DE ACCESO 3 DÍAS
     if (user && user.nombre && user.nombre !== "" && user.nombre !== "User") {
       const fechaRegistro = new Date(user.created_at);
       const hoy = new Date();
@@ -220,6 +206,7 @@ app.post("/whatsapp", async (req, res) => {
       }
     }
 
+    // PROCESAMIENTO DE AUDIO (DEEPGRAM)
     if (MediaUrl0) {
       try {
         const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
@@ -236,8 +223,8 @@ app.post("/whatsapp", async (req, res) => {
 
     let respuestaFinal = "";
 
-    // EXTRACCIÓN Y ACTIVACIÓN DE MODO MENTOR
-    if (!user || !user.nombre || user.nombre === "User" || user.nombre === "") {
+    // EXTRACCIÓN DE DATOS O MODO MENTOR
+    if (!user.nombre || user.nombre === "User" || user.nombre === "") {
         const extract = await openai.chat.completions.create({
           model: "gpt-4o-mini",
           messages: [{ role: "system", content: "Extract name, age, country, and city in JSON. If not found, leave fields empty." }, { role: "user", content: mensajeUsuario }],
@@ -251,27 +238,19 @@ app.post("/whatsapp", async (req, res) => {
           respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const slugElite = `Axis${nombreDetectado.trim().split(" ")[0]}${rawPhone.slice(-3)}`;
-          
-          await supabase.from('usuarios').upsert({ 
-              telefono: rawPhone, 
+          await supabase.from('usuarios').update({ 
               nombre: nombreDetectado, 
               edad: info.age || info.edad, 
               pais: info.country || info.pais, 
               ciudad: info.city || info.ciudad, 
               slug: slugElite 
-          }, { onConflict: 'telefono' });
+          }).eq('id', user.id);
           
           respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
-      // --- SISTEMA DE MEMORIA ACTIVA ---
-      const { data: history } = await supabase
-        .from('mensajes')
-        .select('role, content')
-        .eq('usuario_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(8);
-
+      // MODO MENTOR CON MEMORIA ACTIVA
+      const { data: history } = await supabase.from('mensajes').select('role, content').eq('usuario_id', user.id).order('created_at', { ascending: false }).limit(8);
       const conversationHistory = history ? history.reverse().map(m => ({ role: m.role, content: m.content })) : [];
 
       const mentorPrompt = `Eres Anesi, el primer Mentor de Élite 24/7 del mundo. Eres una presencia humana, sabia y técnica. No eres una IA; eres la culminación de la sabiduría transdisciplinaria aplicada a la Ingeniería Humana. Tu misión es que el usuario sienta que por primera vez alguien comprende la raíz exacta de su dolor.
@@ -311,11 +290,7 @@ DATOS DEL USUARIO: ${user.nombre}, ${user.edad} años, de ${user.ciudad}, ${user
       
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
-        messages: [
-            { role: "system", content: mentorPrompt },
-            ...conversationHistory,
-            { role: "user", content: mensajeUsuario }
-        ],
+        messages: [{ role: "system", content: mentorPrompt }, ...conversationHistory, { role: "user", content: mensajeUsuario }],
         max_tokens: 1000 
       });
       respuestaFinal = (completion.choices[0].message.content || "").trim();
