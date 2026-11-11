@@ -267,27 +267,11 @@ app.post("/whatsapp", async (req, res) => {
           response_format: { type: "json_object" }
         });
         
-        const info = JSON.parse(extract.choices[0].message.content || "{}");
-        const nombreDetectado = info.name || info.nombre;
-        const userLang = user.idioma || 'es';
+        const info = JSON.parse(extract.choices[0].message.content || "{}");      const enlacePortal = userLang === 'en' ? 'https://anesi.app?lang=en' : 'https://anesi.app';
 
-        if (!nombreDetectado || nombreDetectado.toLowerCase() === "user" || nombreDetectado.length < 2) {
-          respuestaFinal = userLang === 'en'
-            ? "For our mentorship to be elite and truly personal, I need to know your name. What should I call you? (Please tell me along with your age, city, and country to get started)."
-            : "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
-        } else {
-          const slugElite = `Axis${nombreDetectado.trim().split(" ")[0]}${rawPhone.slice(-3)}`;
-          await supabase.from('usuarios').update({ 
-              nombre: nombreDetectado, 
-              edad: info.age || info.edad, 
-              pais: info.country || info.pais, 
-              ciudad: info.city || info.ciudad, 
-              slug: slugElite 
-          }).eq('id', user.id);
-          
-          respuestaFinal = userLang === 'en'
-            ? `Welcome to your new reality, ${nombreDetectado}. I am Anesi, your 24/7 mentor and Guardian of Human Coherence. 🛡️✨\n\nFrom this moment on, you are no longer alone. My mission is to accompany you in your Human Engineering process to decipher the language of your body and recover your peace. Your body is a perfect machine and I am the technician who will help you recalibrate it. 🧬\n\nThis is your access portal to share coherence with others: https://anesi.app\n\nWhere do you want to start today? Tell me, what is taking away your peace today or what physical discomfort are you feeling? I'm listening.`
-            : `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
+      respuestaFinal = userLang === 'en'
+        ? `Welcome to your new reality, ${nombreDetectado}. I am Anesi, your 24/7 mentor and Guardian of Human Coherence. 🛡️✨\n\nFrom this moment on, you are no longer alone. My mission is to accompany you in your Human Engineering process to decipher the language of your body and recover your peace. Your body is a perfect machine and I am the technician who will help you recalibrate it. 🧬\n\nThis is your access portal to share coherence with others: ${enlacePortal}\n\nWhere do you want to start today? Tell me, what is taking away your peace today or what physical discomfort are you feeling? I'm listening.`
+        : `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: ${enlacePortal}\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
       // MODO MENTOR CON MEMORIA ACTIVA
