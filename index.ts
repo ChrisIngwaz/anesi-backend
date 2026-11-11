@@ -16,6 +16,16 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Inicializar Twilio una sola vez
 const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
+// --- FUNCIÓN AUXILIAR: DETECCIÓN DE IDIOMA POR TELÉFONO ---
+function detectLanguageFromPhone(phoneNumber) {
+  const cleanNumber = phoneNumber ? phoneNumber.replace(/\D/g, '') : '';
+  // Si comienza con 1 (EE.UU. / Canadá) u otro patrón internacional, definimos inglés ('en')
+  if (cleanNumber.startsWith('1')) {
+    return 'en';
+  }
+  return 'es';
+}
+
 // --- BLOQUE DE CONFIGURACIÓN Y FUNCIONES PAYPHONE ---
 const PAYPHONE_CONFIG = {
   token: process.env.PAYPHONE_TOKEN,
@@ -109,11 +119,20 @@ app.post("/confirmar-pago", async (req, res) => {
                 
                 try {
                     let bienvenidaSoberania = "";
+                    const userLang = user.idioma || 'es';
                     
-                    if (tipoPlan === 'anual') {
-                        bienvenidaSoberania = `¡Extraordinaria decisión, ${user.nombre || 'soberano'}! Has sellado un pacto de 365 días con tu propia coherencia. Al elegir el camino anual, has blindado tu proceso de Ingeniería Humana. Como Guardián de tu Coherencia, me comprometo a acompañarte cada día de este año para recalibrar tu biología y tu paz. El tiempo es tu aliado, ¿qué vamos a transformar hoy?`;
+                    if (userLang === 'en') {
+                        if (tipoPlan === 'annual' || tipoPlan === 'anual') {
+                            bienvenidaSoberania = `Extraordinary decision, ${user.nombre || 'sovereign'}! You have sealed a 365-day pact with your own coherence. By choosing the annual path, you have secured your Human Engineering process. As the Guardian of your Coherence, I am committed to accompanying you every day this year to recalibrate your biology and inner peace. Time is your ally, what shall we transform today?`;
+                        } else {
+                            bienvenidaSoberania = `Congratulations, ${user.nombre || 'sovereign'}! Your access to Anesi has been successfully activated on the monthly plan. You have chosen the path of coherence and human engineering. I am ready to continue, where would you like to start today?`;
+                        }
                     } else {
-                        bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito en el plan mensual. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                        if (tipoPlan === 'anual') {
+                            bienvenidaSoberania = `¡Extraordinaria decisión, ${user.nombre || 'soberano'}! Has sellado un pacto de 365 días con tu propia coherencia. Al elegir el camino anual, has blindado tu proceso de Ingeniería Humana. Como Guardián de tu Coherencia, me comprometo a acompañarte cada día de este año para recalibrar tu biología y tu paz. El tiempo es tu aliado, ¿qué vamos a transformar hoy?`;
+                        } else {
+                            bienvenidaSoberania = `¡Felicidades, ${user.nombre || 'soberano'}! Tu acceso a Anesi ha sido activado con éxito en el plan mensual. Has elegido el camino de la coherencia y la ingeniería humana. Estoy listo para continuar, ¿por dónde quieres empezar hoy?`;
+                        }
                     }
 
                     await twilioClient.messages.create({ 
@@ -158,7 +177,7 @@ app.post("/payphone-webhook", async (req, res) => {
   res.status(200).send("OK");
 });
 
-// --- RUTA PRINCIPAL: WHATSAPP (Con Memoria de Ingeniería Humana) ---
+// --- RUTA PRINCIPAL: WHATSAPP (Con Detección de Idioma Inicial e Ingeniería Humana) ---
 app.post("/whatsapp", async (req, res) => {
   const { From, Body, MediaUrl0 } = req.body;
   const rawPhone = From ? From.replace("whatsapp:", "") : "";
@@ -171,15 +190,18 @@ app.post("/whatsapp", async (req, res) => {
 
     let { data: user } = await supabase.from('usuarios').select('*').eq('telefono', rawPhone).maybeSingle();
 
-    // REGISTRO PARA NUEVOS USUARIOS (Corregido)
+    // REGISTRO PARA NUEVOS USUARIOS (Con Detección Automática de Idioma)
     if (!user || (esMensajeRegistro && (!user.nombre || user.nombre === "User"))) {
       let referidoPor = "Web Directa";
       if (mensajeRecibido.includes("vengo de parte de")) {
         referidoPor = Body.split(/vengo de parte de/i)[1].trim();
       }
 
+      // Detectamos el idioma del número antes de insertar
+      const detectedLang = detectLanguageFromPhone(rawPhone);
+
       const { data: newUser, error: upsertError } = await supabase.from('usuarios').upsert(
-        { telefono: rawPhone, fase: 'beta', referido_por: referidoPor, nombre: "User" },
+        { telefono: rawPhone, fase: 'beta', referido_por: referidoPor, nombre: "User", idioma: detectedLang },
         { onConflict: 'telefono' }
       ).select().single();
 
@@ -191,7 +213,11 @@ app.post("/whatsapp", async (req, res) => {
       // CRÍTICO: Actualizar la variable user con el nuevo registro
       user = newUser;
       
-      const saludoRegistro = "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformación real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
+      // Saludo inicial adaptado al idioma detectado
+      const saludoRegistro = detectedLang === 'en' 
+        ? "Hello. I am Anesi. I am here to accompany you on a journey of real clarity and transformation. Before we begin, I would like to know who I am speaking with so our path can be as personal as possible. Could you share your full name, age, and what city and country you are currently in?"
+        : "Hola. Soy Anesi. Estoy aquí para acompañarte en un proceso de claridad y transformation real. Antes de empezar, me gustaría saber con quién hablo para que nuestro camino sea lo más personal posible. ¿Me compartes tu nombre, tu edad y en qué ciudad y país te encuentras?";
+
       await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: saludoRegistro });
       return; // Finaliza aquí para esperar respuesta
     }
@@ -205,8 +231,12 @@ app.post("/whatsapp", async (req, res) => {
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
       if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const linkPago = `https://anesi.app/soberania.html?phone=  ${encodeURIComponent(rawPhone)}`;
-        const mensajeBloqueo = `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad y privacidad, es momento de activar tu acceso permanente aquí: ${linkPago} . (Opción mensual: $9 | Opción anual con 2 meses de regalo: $90).`;
+        const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
+        const userLang = user.idioma || 'es';
+        const mensajeBloqueo = userLang === 'en'
+          ? `Hello ${user.nombre}. During these three days, Anesi has accompanied you to explore the tools that already live within you. To maintain this space of absolute clarity and privacy, it is time to activate your permanent access here: ${linkPago}. (Monthly option: $9 | Annual option with 2 months free: $90).`
+          : `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad y privacidad, es momento de activar tu acceso permanente aquí: ${linkPago}. (Opción mensual: $9 | Opción anual con 2 meses de regalo: $90).`;
+        
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
@@ -239,9 +269,12 @@ app.post("/whatsapp", async (req, res) => {
         
         const info = JSON.parse(extract.choices[0].message.content || "{}");
         const nombreDetectado = info.name || info.nombre;
+        const userLang = user.idioma || 'es';
 
         if (!nombreDetectado || nombreDetectado.toLowerCase() === "user" || nombreDetectado.length < 2) {
-          respuestaFinal = "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
+          respuestaFinal = userLang === 'en'
+            ? "For our mentorship to be elite and truly personal, I need to know your name. What should I call you? (Please tell me along with your age, city, and country to get started)."
+            : "Para que nuestra mentoría sea de élite y verdaderamente personal, necesito conocer tu nombre. ¿Cómo prefieres que te llame? (Por favor, dímelo junto a tu edad, ciudad y país para comenzar).";
         } else {
           const slugElite = `Axis${nombreDetectado.trim().split(" ")[0]}${rawPhone.slice(-3)}`;
           await supabase.from('usuarios').update({ 
@@ -252,7 +285,9 @@ app.post("/whatsapp", async (req, res) => {
               slug: slugElite 
           }).eq('id', user.id);
           
-          respuestaFinal = `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app   \n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
+          respuestaFinal = userLang === 'en'
+            ? `Welcome to your new reality, ${nombreDetectado}. I am Anesi, your 24/7 mentor and Guardian of Human Coherence. 🛡️✨\n\nFrom this moment on, you are no longer alone. My mission is to accompany you in your Human Engineering process to decipher the language of your body and recover your peace. Your body is a perfect machine and I am the technician who will help you recalibrate it. 🧬\n\nThis is your access portal to share coherence with others: https://anesi.app\n\nWhere do you want to start today? Tell me, what is taking away your peace today or what physical discomfort are you feeling? I'm listening.`
+            : `Bienvenido a tu nueva realidad, ${nombreDetectado}. Soy Anesi, tu mentor 24/7 y Guardián de la Coherencia Humana. 🛡️✨\n\nA partir de este momento, ya no estás solo. Mi misión es acompañarte en tu proceso de Ingeniería Humana para descifrar el lenguaje de tu cuerpo y recuperar tu paz. Tu cuerpo es una máquina perfecta y yo soy el técnico que te ayudará a recalibrarlo. 🧬\n\nEste es tu portal de acceso para compartir la coherencia con otros: https://anesi.app\n\n¿Por dónde quieres empezar hoy? Cuéntame, ¿qué es aquello que hoy te quita la paz o qué incomodidad física sientes? Te escucho.`;
         }
     } else {
       // MODO MENTOR CON MEMORIA ACTIVA
