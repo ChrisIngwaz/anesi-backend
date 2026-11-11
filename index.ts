@@ -230,13 +230,16 @@ app.post("/whatsapp", async (req, res) => {
       const hoy = new Date();
       const diasTranscurridos = (hoy - fechaRegistro) / (1000 * 60 * 60 * 24);
 
-      if (diasTranscurridos > 3 && !user.suscripcion_activa) {
-        const linkPago = `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
+            if (diasTranscurridos > 3 && !user.suscripcion_activa) {
         const userLang = user.idioma || 'es';
+        const linkPago = userLang === 'en' 
+          ? `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}&lang=en`
+          : `https://anesi.app/soberania.html?phone=${encodeURIComponent(rawPhone)}`;
+
         const mensajeBloqueo = userLang === 'en'
           ? `Hello ${user.nombre}. During these three days, Anesi has accompanied you to explore the tools that already live within you. To maintain this space of absolute clarity and privacy, it is time to activate your permanent access here: ${linkPago}. (Monthly option: $9 | Annual option with 2 months free: $90).`
           : `Hola ${user.nombre}. Durante estos tres días, Anesi te ha acompañado a explorar las herramientas que ya habitan en ti. Para mantener este espacio de absoluta claridad y privacidad, es momento de activar tu acceso permanente aquí: ${linkPago}. (Opción mensual: $9 | Opción anual con 2 meses de regalo: $90).`;
-        
+
         await twilioClient.messages.create({ from: 'whatsapp:+14155730323', to: `whatsapp:${rawPhone}`, body: mensajeBloqueo });
         return; 
       }
